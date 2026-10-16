@@ -95,6 +95,12 @@
           </div>
         </div>
 
+        <!-- 权限排队提示 -->
+        <div v-if="permPendingCount > 0" class="perm-banner">
+          <span>🔐 有 {{ permPendingCount }} 个权限请求等待确认</span>
+          <el-button size="small" type="primary" @click="showNextPerm" v-if="!permVisible">立即查看</el-button>
+        </div>
+
         <!-- 输入区 -->
         <div class="chat-input">
           <div class="input-box">
@@ -148,7 +154,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Delete, Tools } from '@element-plus/icons-vue'
 import { marked } from 'marked'
@@ -158,6 +164,7 @@ import {
   deleteChatSession,
   sendChatPrompt,
   getChatMessages,
+  getChatPermissions,
 } from '@/api/opencode'
 import { getProviderConfig } from '@/api/ai'
 
@@ -176,10 +183,18 @@ const providerModel = ref('')
 const permVisible = ref(false)
 const permRequest = ref(null)
 const pendingPermId = ref('')
+const permQueue = ref([]) // 待确认的权限请求队列（SSE/轮询可能同时收到多个）
+const shownPermIds = new Set() // 已提示过的权限 id，防止重复弹窗
+let permTimer = null
+
+// 排队待确认的权限数量（含当前弹窗中的）
+const permPendingCount = computed(() =>
+  (permVisible.value ? 1 : 0) + permQueue.value.length)
 
 // SSE
 let sseController = null
 let sseAborted = false
+let sseTimer = null
 let pollTimer = null
 let pollSeq = 0
 
@@ -197,6 +212,8 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   sseAborted = true
+  clearTimeout(sseTimer)
+  clearTimeout(permTimer)
   sseController?.abort()
   clearInterval(pollTimer)
 })
@@ -353,6 +370,7 @@ async function handleSend() {
 
   try {
     await sendChatPrompt(currentId.value, text)
+    checkPendingPerms() // SSE 若已断开，第一时间兜底发现挂起权限
     startPolling()
   } catch (e) {
     finishStreaming()
@@ -394,8 +412,14 @@ function connectSse() {
       const decoder = new TextDecoder()
       let buffer = ''
       const pump = () => {
+        if (sseAborted) return
         reader.read().then(({ done, value }) => {
-          if (done) return
+          if (sseAborted) return
+          if (done) {
+            // 连接正常结束 → 重连
+            scheduleSseReconnect()
+            return
+          }
           buffer += decoder.decode(value, { stream: true })
           const chunks = buffer.split('\n')
           buffer = chunks.pop()
@@ -410,16 +434,21 @@ function connectSse() {
             }
           }
           pump()
-        }).catch(() => {})
+        }).catch(() => {
+          // 读取中断 → 重连（组件卸载除外）
+          if (!sseAborted) scheduleSseReconnect()
+        })
       }
       pump()
     })
-    .catch((e) => {
-      if (!sseAborted) {
-        // 稍后重连
-        setTimeout(connectSse, 3000)
-      }
+    .catch(() => {
+      if (!sseAborted) scheduleSseReconnect()
     })
+}
+
+function scheduleSseReconnect() {
+  clearTimeout(sseTimer)
+  sseTimer = setTimeout(connectSse, 3000)
 }
 
 function handleEvent(evt) {
@@ -527,30 +556,81 @@ function findStreamingKey() {
 
 // ---------- 权限 ----------
 
+/**
+ * 收到权限请求（SSE 或轮询兜底）后入队，逐个弹窗确认。
+ */
 function handlePermission(data) {
-  pendingPermId.value = data.id || ''
-  permRequest.value = {
-    action: data.action || 'shell',
-    resources: data.resources || [],
+  const id = data.id || ''
+  if (!id || shownPermIds.has(id)) return
+  shownPermIds.add(id)
+  // 非当前会话的权限事件直接忽略（SSE 是全局事件流）
+  if (data.sessionID && data.sessionID !== currentId.value) return
+  const item = { id, action: data.action || 'shell', resources: data.resources || [] }
+  if (data.sessionID) item.sessionId = data.sessionID
+  permQueue.value.push(item)
+  if (!permVisible.value) showNextPerm()
+}
+
+function showNextPerm() {
+  // 跳过不属于当前会话的请求（用户可能已切换会话）
+  while (permQueue.value.length && permQueue.value[0].sessionId && permQueue.value[0].sessionId !== currentId.value) {
+    permQueue.value.shift()
   }
+  const p = permQueue.value.shift()
+  if (!p) return
+  pendingPermId.value = p.id
+  permRequest.value = { action: p.action, resources: p.resources }
   permVisible.value = true
+  // 防漏：弹窗长时未操作自动拒绝，避免无限卡死
+  clearTimeout(permTimer)
+  permTimer = setTimeout(() => {
+    if (permVisible.value && pendingPermId.value === p.id) {
+      ElMessage.warning('权限请求超时（5 分钟未确认），已自动拒绝')
+      replyPerm('reject')
+    }
+  }, 5 * 60 * 1000)
 }
 
 async function replyPerm(decision) {
+  clearTimeout(permTimer)
+  const reqId = pendingPermId.value
   permVisible.value = false
+  pendingPermId.value = ''
+  if (!reqId) return
+  let ok = false
   try {
-    const resp = await fetch(`/api/ai/chat/sessions/${currentId.value}/permission/${pendingPermId.value}/reply`, {
+    const resp = await fetch(`/api/ai/chat/sessions/${currentId.value}/permission/${reqId}/reply`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` },
       body: JSON.stringify({ decision }),
     })
-    if (!resp.ok) {
-      ElMessage.error(`权限回复失败: HTTP ${resp.status}`)
-    }
+    if (resp.ok) ok = true
+    else ElMessage.error(`权限回复失败: HTTP ${resp.status}`)
   } catch (e) {
     ElMessage.error(`权限回复失败: ${e.message}`)
   }
-  pendingPermId.value = ''
+  if (!ok) {
+    shownPermIds.delete(reqId) // 回复失败后允许轮询重新弹起
+  }
+  showNextPerm()
+}
+
+/**
+ * 兜底：SSE 断开时通过轮询发现挂起的权限请求并弹窗。
+ */
+async function checkPendingPerms() {
+  if (!currentId.value) return
+  try {
+    const perms = await getChatPermissions(currentId.value)
+    if (!Array.isArray(perms) || !perms.length) return
+    for (const p of perms) {
+      if (p.id && !shownPermIds.has(p.id)) {
+        handlePermission({ id: p.id, action: p.action, resources: p.resources, sessionID: currentId.value })
+      }
+    }
+  } catch {
+    // bridge 不可用等场景静默忽略，下一轮再试
+  }
 }
 
 // ---------- 兜底轮询 ----------
@@ -560,6 +640,7 @@ function startPolling() {
   pollTimer = setInterval(() => {
     if (!currentId.value) return
     const mySeq = ++pollSeq
+    checkPendingPerms()
     getChatMessages(currentId.value).then((raw) => {
       if (mySeq !== pollSeq) return
       const list = (raw && Array.isArray(raw)) ? raw : []
@@ -695,6 +776,16 @@ function scrollToBottom() {
   flex: 1;
   overflow-y: auto;
   padding: 20px 24px;
+}
+.perm-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px;
+  background: #fdf6ec;
+  border-bottom: 1px solid #f5dab1;
+  color: #b88230;
+  font-size: 13px;
 }
 .msg-row {
   display: flex;

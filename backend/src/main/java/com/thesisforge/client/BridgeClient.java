@@ -167,6 +167,21 @@ public class BridgeClient {
     }
 
     /**
+     * 列出会话挂起的权限请求。
+     */
+    public JsonNode listChatPermissions(String sessionId) {
+        try {
+            ResponseEntity<String> resp = restTemplate.getForEntity(
+                    bridgeUrl + "/api/opencode/sessions/" + sessionId + "/permission", String.class);
+            JsonNode json = objectMapper.readTree(resp.getBody());
+            return json.path("data");
+        } catch (Exception e) {
+            log.warn("bridge 不可用，读取权限请求失败: {}", e.getMessage());
+            return objectMapper.createArrayNode();
+        }
+    }
+
+    /**
      * 回复权限请求。
      *
      * @return 是否成功

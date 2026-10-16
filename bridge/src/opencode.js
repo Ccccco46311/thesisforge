@@ -348,6 +348,23 @@ export const DEFAULT_PERMISSIONS = [
   { action: 'shell', resource: 'git rev-parse *', effect: 'allow' },
   { action: 'shell', resource: 'git ls-files *', effect: 'allow' },
   { action: 'shell', resource: 'git show *', effect: 'allow' },
+  // 只读 PowerShell 巡检 / 目录列举 / 管道处理放行（开发场景高频且安全）
+  { action: 'shell', resource: 'systeminfo*', effect: 'allow' },
+  { action: 'shell', resource: 'Get-ComputerInfo*', effect: 'allow' },
+  { action: 'shell', resource: 'Get-Location*', effect: 'allow' },
+  { action: 'shell', resource: 'Get-ChildItem*', effect: 'allow' },
+  { action: 'shell', resource: 'Get-Date*', effect: 'allow' },
+  { action: 'shell', resource: 'Set-Location*', effect: 'allow' },
+  { action: 'shell', resource: 'cd *', effect: 'allow' },
+  { action: 'shell', resource: 'pwd*', effect: 'allow' },
+  { action: 'shell', resource: 'hostname*', effect: 'allow' },
+  { action: 'shell', resource: 'ver*', effect: 'allow' },
+  { action: 'shell', resource: 'Select-Object*', effect: 'allow' },
+  { action: 'shell', resource: 'Where-Object*', effect: 'allow' },
+  { action: 'shell', resource: 'Sort-Object*', effect: 'allow' },
+  { action: 'shell', resource: 'Measure-Object*', effect: 'allow' },
+  { action: 'shell', resource: 'ForEach-Object*', effect: 'allow' },
+  { action: 'shell', resource: 'Write-Output*', effect: 'allow' },
   // 项目内读写默认允许（location 内路径）
   { action: 'read', resource: '*', effect: 'allow' },
   { action: 'edit', resource: '*', effect: 'allow' },
@@ -404,6 +421,16 @@ export async function prompt(sessionId, text) {
  */
 export async function getMessages(sessionId) {
   const json = await request('GET', `/api/session/${sessionId}/message`)
+  return json?.data || []
+}
+
+/**
+ * 列出会话挂起的权限请求。
+ * @param {string} sessionId
+ * @returns {Array} pending 权限请求数组
+ */
+export async function listPermissions(sessionId) {
+  const json = await request('GET', `/api/session/${sessionId}/permission`)
   return json?.data || []
 }
 

@@ -16,6 +16,7 @@ import {
   applyProvider,
   openEventStream,
   replyPermission,
+  listPermissions,
   PROJECT_ROOT,
   DEFAULT_PERMISSIONS,
 } from './opencode.js'
@@ -194,6 +195,19 @@ app.get('/api/opencode/sessions/:id/message', async (req, res) => {
     res.json({ code: 200, msg: 'ok', data: messages })
   } catch (e) {
     res.status(500).json({ code: 500, msg: `读取消息失败: ${e.message}`, data: null })
+  }
+})
+
+/**
+ * GET /api/opencode/sessions/:id/permission
+ * 读取会话挂起的权限请求（前端兜底轮询用）。
+ */
+app.get('/api/opencode/sessions/:id/permission', async (req, res) => {
+  try {
+    const perms = await listPermissions(req.params.id)
+    res.json({ code: 200, msg: 'ok', data: perms })
+  } catch (e) {
+    res.status(500).json({ code: 500, msg: `读取权限请求失败: ${e.message}`, data: null })
   }
 })
 

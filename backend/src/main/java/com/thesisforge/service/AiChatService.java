@@ -179,6 +179,13 @@ public class AiChatService {
         bridgeClient.replyChatPermission(sessionId, requestId, decision);
     }
 
+    /**
+     * 列出会话挂起的权限请求（前端兜底轮询用）。
+     */
+    public JsonNode listPermissions(String sessionId) {
+        return bridgeClient.listChatPermissions(sessionId);
+    }
+
     private void bumpMessageCount(String sessionId) {
         try {
             AiChatSession exist = chatSessionMapper.selectOne(

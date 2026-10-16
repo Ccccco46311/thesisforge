@@ -75,6 +75,11 @@ public class AiChatController {
         return Result.ok(aiChatService.getMessages(sessionId));
     }
 
+    @GetMapping("/sessions/{sessionId}/permission")
+    public Result<JsonNode> listPermissions(@PathVariable String sessionId) {
+        return Result.ok(aiChatService.listPermissions(sessionId));
+    }
+
     @PostMapping("/sessions/{sessionId}/permission/{requestId}/reply")
     public Result<Void> replyPermission(@PathVariable String sessionId,
                                         @PathVariable String requestId,
