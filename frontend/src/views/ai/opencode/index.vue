@@ -1,61 +1,918 @@
 <template>
-  <el-card class="opencode-card">
-    <template #header>
-      <div class="card-header">
-        <span>AI 开发</span>
-        <el-tag type="success" size="small">OpenCode 已嵌入</el-tag>
+  <div class="chat-page">
+    <!-- 左侧：会话列表 -->
+    <aside class="chat-sidebar">
+      <div class="sidebar-header">
+        <span class="logo">AI 开发</span>
+        <el-button type="primary" size="small" @click="handleCreate" :loading="creating">
+          新建会话
+        </el-button>
       </div>
-    </template>
-    <div class="frame-wrap">
-      <iframe
-        v-if="src"
-        :src="src"
-        class="opencode-frame"
-        allow="clipboard-write; clipboard-read"
-      />
-      <el-empty v-else description="未配置 OpenCode 服务地址，请先在「供应商配置」填写" />
-    </div>
-  </el-card>
+      <div class="session-list">
+        <div
+          v-for="s in sessions"
+          :key="s.sessionId"
+          class="session-item"
+          :class="{ active: s.sessionId === currentId }"
+          @click="switchSession(s.sessionId)"
+        >
+          <div class="session-title" :title="s.title">{{ s.title }}</div>
+          <div class="session-actions">
+            <el-icon class="del-btn" @click.stop="handleDelete(s.sessionId)"><Delete /></el-icon>
+          </div>
+        </div>
+        <el-empty v-if="!sessions.length" description="暂无会话" :image-size="60" />
+      </div>
+    </aside>
+
+    <!-- 右侧：对话区 -->
+    <main class="chat-main">
+      <template v-if="currentId">
+        <div class="msg-list" ref="msgListRef">
+          <div
+            v-for="(m, idx) in messages"
+            :key="m.key"
+            class="msg-row"
+            :class="m.role"
+          >
+            <!-- 用户消息 -->
+            <template v-if="m.role === 'user'">
+              <div class="msg-bubble user-bubble">{{ m.text }}</div>
+            </template>
+
+            <!-- AI 消息 -->
+            <template v-else-if="m.role === 'assistant'">
+              <div class="msg-avatar">AI</div>
+              <div class="msg-body">
+                <!-- 推理过程折叠 -->
+                <el-collapse v-if="m.reasoning" class="reasoning">
+                  <el-collapse-item title="推理过程" name="reasoning">
+                    <pre class="reasoning-text">{{ m.reasoning }}</pre>
+                  </el-collapse-item>
+                </el-collapse>
+
+                <!-- 工具调用 -->
+                <div v-for="(t, ti) in m.tools" :key="ti" class="tool-call">
+                  <el-collapse>
+                    <el-collapse-item :name="ti">
+                      <template #title>
+                        <span class="tool-title">
+                          <el-icon><Tools /></el-icon>
+                          {{ t.name }}
+                          <el-tag size="small" :type="t.state === 'completed' ? 'success' : (t.state === 'error' ? 'danger' : 'info')" class="tool-state">
+                            {{ t.state === 'error' ? '失败' : (t.state === 'completed' ? '完成' : '运行中') }}
+                          </el-tag>
+                        </span>
+                      </template>
+                      <div class="tool-detail">
+                        <div v-if="t.input" class="tool-block">
+                          <div class="tool-label">输入</div>
+                          <pre>{{ formatToolInput(t.input) }}</pre>
+                        </div>
+                        <div v-if="t.output" class="tool-block">
+                          <div class="tool-label">输出</div>
+                          <pre>{{ formatToolOutput(t.output) }}</pre>
+                        </div>
+                        <div v-if="t.error" class="tool-block error">
+                          <div class="tool-label">错误</div>
+                          <pre>{{ t.error }}</pre>
+                        </div>
+                      </div>
+                    </el-collapse-item>
+                  </el-collapse>
+                </div>
+
+                <!-- 正文（Markdown） -->
+                <div v-if="m.text || m.streaming" class="markdown-body" v-html="renderMd(m.text)" />
+                <div v-if="m.streaming && !m.text" class="typing"><span class="dot"></span></div>
+              </div>
+            </template>
+
+            <!-- 系统消息 -->
+            <template v-else-if="m.role === 'system'">
+              <div class="msg-system">{{ m.text }}</div>
+            </template>
+          </div>
+        </div>
+
+        <!-- 输入区 -->
+        <div class="chat-input">
+          <div class="input-box">
+            <el-input
+              v-model="draft"
+              type="textarea"
+              :rows="2"
+              resize="none"
+              placeholder="描述你的开发需求，Enter 发送，Shift+Enter 换行"
+              @keydown.enter.exact.prevent="handleSend"
+            />
+            <div class="input-actions">
+              <span class="hint">AI 可读取并修改项目文件，敏感命令会询问你</span>
+              <el-button
+                type="primary"
+                :loading="sending"
+                :disabled="!draft.trim() || running"
+                @click="handleSend"
+              >
+                发送
+              </el-button>
+            </div>
+          </div>
+        </div>
+      </template>
+
+      <el-empty v-else description="从左侧选择或新建一个会话开始" :image-size="120" />
+    </main>
+
+    <!-- 权限确认弹窗 -->
+    <el-dialog
+      v-model="permVisible"
+      title="权限确认"
+      width="480px"
+      :close-on-click-modal="false"
+      :show-close="false"
+      append-to-body
+    >
+      <div class="perm-content">
+        <p class="perm-desc">AI 请求执行以下操作，是否允许？</p>
+        <div class="perm-action">{{ permRequest?.action }}</div>
+        <pre class="perm-resources">{{ permRequest?.resources?.join('\n') }}</pre>
+      </div>
+      <template #footer>
+        <el-button type="danger" @click="replyPerm('reject')">拒绝</el-button>
+        <el-button @click="replyPerm('once')">仅此一次</el-button>
+        <el-button type="primary" @click="replyPerm('always')">总是允许</el-button>
+      </template>
+    </el-dialog>
+  </div>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, reactive, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { Delete, Tools } from '@element-plus/icons-vue'
+import { marked } from 'marked'
+import {
+  listChatSessions,
+  createChatSession,
+  deleteChatSession,
+  sendChatPrompt,
+  getChatMessages,
+} from '@/api/opencode'
 import { getProviderConfig } from '@/api/ai'
 
-const src = ref('')
+// ---------- 状态 ----------
+const sessions = ref([])
+const currentId = ref('')
+const messages = ref([])
+const draft = ref('')
+const creating = ref(false)
+const sending = ref(false)
+const running = ref(false)
+const msgListRef = ref(null)
+const providerModel = ref('')
 
+// 权限弹窗
+const permVisible = ref(false)
+const permRequest = ref(null)
+const pendingPermId = ref('')
+
+// SSE
+let sseController = null
+let sseAborted = false
+let pollTimer = null
+let pollSeq = 0
+
+// 正在流式输出的 assistant 消息 key
+let streamingKey = ''
+
+marked.setOptions({ gfm: true, breaks: true })
+
+// ---------- 生命周期 ----------
 onMounted(async () => {
+  await loadProviderModel()
+  await loadSessions()
+  connectSse()
+})
+
+onBeforeUnmount(() => {
+  sseAborted = true
+  sseController?.abort()
+  clearInterval(pollTimer)
+})
+
+async function loadProviderModel() {
   try {
-    const data = await getProviderConfig()
-    if (data?.opencodeUrl) {
-      src.value = data.opencodeUrl
+    const cfg = await getProviderConfig()
+    if (cfg?.provider && cfg?.model) {
+      providerModel.value = `${cfg.provider}/${cfg.model}`
     }
   } catch {
-    // ignore
+    // 无配置时忽略，serve 用默认模型
   }
-})
+}
+
+async function loadSessions() {
+  try {
+    sessions.value = await listChatSessions()
+    if (sessions.value.length && !currentId.value) {
+      await switchSession(sessions.value[0].sessionId)
+    }
+  } catch (e) {
+    ElMessage.error(`加载会话列表失败: ${e.message}`)
+  }
+}
+
+// ---------- 会话操作 ----------
+
+async function handleCreate() {
+  creating.value = true
+  try {
+    const model = providerModel.value || undefined
+    const s = await createChatSession({ title: `新会话 ${new Date().toLocaleTimeString()}`, model })
+    sessions.value.unshift(s)
+    await switchSession(s.sessionId)
+  } catch (e) {
+    ElMessage.error(`创建会话失败: ${e.message}`)
+  } finally {
+    creating.value = false
+  }
+}
+
+async function handleDelete(sessionId) {
+  try {
+    await ElMessageBox.confirm('删除后不可恢复，确认删除该会话？', '提示', { type: 'warning' })
+  } catch {
+    return
+  }
+  try {
+    await deleteChatSession(sessionId)
+    sessions.value = sessions.value.filter((s) => s.sessionId !== sessionId)
+    if (currentId.value === sessionId) {
+      currentId.value = ''
+      messages.value = []
+      if (sessions.value.length) {
+        await switchSession(sessions.value[0].sessionId)
+      }
+    }
+    ElMessage.success('已删除')
+  } catch (e) {
+    ElMessage.error(`删除失败: ${e.message}`)
+  }
+}
+
+async function switchSession(sessionId) {
+  if (sessionId === currentId.value) return
+  currentId.value = sessionId
+  messages.value = []
+  streamingKey = ''
+  running.value = false
+  await loadMessages(sessionId)
+  scrollToBottom()
+}
+
+async function loadMessages(sessionId) {
+  try {
+    const raw = await getChatMessages(sessionId)
+    const list = (raw && Array.isArray(raw)) ? raw : []
+    messages.value = list.map(parseMessage).filter(Boolean)
+    scrollToBottom()
+  } catch (e) {
+    ElMessage.error(`加载消息失败: ${e.message}`)
+  }
+}
+
+/**
+ * 将 OpenCode Message.Info 转为前端消息模型。
+ */
+function parseMessage(m) {
+  const base = { key: m.id || `${Math.random()}`, role: null, text: '', reasoning: '', tools: [], streaming: false }
+  if (m.type === 'user') {
+    return { ...base, role: 'user', text: m.payload?.text || '' }
+  }
+  if (m.type === 'synthetic') {
+    const content = m.payload?.message || m.payload?.text
+    if (content) {
+      return { ...base, role: 'system', text: typeof content === 'string' ? content : JSON.stringify(content) }
+    }
+    return null
+  }
+  if (m.type === 'assistant') {
+    const content = m.content || []
+    let text = ''
+    let reasoning = ''
+    const tools = []
+    for (const c of content) {
+      if (c.type === 'text') text += c.text || ''
+      else if (c.type === 'reasoning') reasoning += c.text || ''
+      else if (c.type === 'tool') tools.push({
+        name: c.name || 'tool',
+        input: c.input,
+        output: c.output,
+        error: c.error,
+        state: c.state === 'error' ? 'error' : 'completed',
+      })
+    }
+    return { ...base, role: 'assistant', text, reasoning, tools }
+  }
+  if (m.type === 'tool') {
+    const p = m.payload || {}
+    const name = p.name || p.tool || 'tool'
+    return {
+      ...base,
+      role: 'assistant',
+      text: '',
+      tools: [{
+        name,
+        input: p.input || (p.state?.input),
+        output: p.state?.output || p.output,
+        error: p.state?.error || p.error,
+        state: p.state?.status === 'error' ? 'error' : 'completed',
+      }],
+    }
+  }
+  if (m.type === 'idle' && m.outcome === 'error') {
+    return { ...base, role: 'system', text: 'AI 回复失败' }
+  }
+  return null
+}
+
+// ---------- 发送 ----------
+
+async function handleSend() {
+  const text = draft.value.trim()
+  if (!text || sending.value || running.value) return
+  draft.value = ''
+  sending.value = true
+
+  messages.value.push({ key: `user-${Date.now()}`, role: 'user', text })
+  messages.value.push({ key: `assistant-${Date.now()}`, role: 'assistant', text: '', reasoning: '', tools: [], streaming: true })
+  streamingKey = `assistant-${Date.now()}`
+  running.value = true
+  scrollToBottom()
+
+  try {
+    await sendChatPrompt(currentId.value, text)
+    startPolling()
+  } catch (e) {
+    finishStreaming()
+    messages.value.push({ key: `sys-${Date.now()}`, role: 'system', text: `发送失败: ${e.message}` })
+    ElMessage.error(`发送失败: ${e.message}`)
+  } finally {
+    sending.value = false
+  }
+}
+
+function finishStreaming() {
+  const idx = messages.value.findIndex((m) => m.key === streamingKey)
+  if (idx !== -1) {
+    messages.value[idx].streaming = false
+    if (!messages.value[idx].text && !messages.value[idx].tools.length) {
+      messages.value[idx].text = messages.value[idx].reasoning ? '(完成)' : ''
+    }
+  }
+  running.value = false
+  streamingKey = ''
+}
+
+// ---------- SSE ----------
+
+function connectSse() {
+  const token = localStorage.getItem('token')
+  if (!token) return
+  sseController = new AbortController()
+  const url = `${import.meta.env.VITE_API_BASE || ''}/api/ai/chat/events`
+  fetch(url, {
+    headers: { Authorization: `Bearer ${token}` },
+    signal: sseController.signal,
+  })
+    .then((resp) => {
+      if (!resp.ok) throw new Error(`SSE HTTP ${resp.status}`)
+      return resp.body.getReader()
+    })
+    .then((reader) => {
+      const decoder = new TextDecoder()
+      let buffer = ''
+      const pump = () => {
+        reader.read().then(({ done, value }) => {
+          if (done) return
+          buffer += decoder.decode(value, { stream: true })
+          const chunks = buffer.split('\n')
+          buffer = chunks.pop()
+          for (const line of chunks) {
+            const m = line.match(/^data:\s*(.+)$/)
+            if (m) {
+              try {
+                handleEvent(JSON.parse(m[1]))
+              } catch {
+                // 忽略非 JSON 行
+              }
+            }
+          }
+          pump()
+        }).catch(() => {})
+      }
+      pump()
+    })
+    .catch((e) => {
+      if (!sseAborted) {
+        // 稍后重连
+        setTimeout(connectSse, 3000)
+      }
+    })
+}
+
+function handleEvent(evt) {
+  const type = evt.type || ''
+  const data = evt.data || {}
+
+  // 只处理当前会话事件
+  if (type.startsWith('session.') && data.sessionID && data.sessionID !== currentId.value) {
+    return
+  }
+
+  if (type === 'session.step.started') {
+    // 新一步开始，若没有流式消息则建一个
+    if (!running.value && !messages.value.find((m) => m.streaming)) {
+      messages.value.push({ key: `assistant-${Date.now()}`, role: 'assistant', text: '', reasoning: '', tools: [], streaming: true })
+      streamingKey = `assistant-${Date.now()}`
+      running.value = true
+    }
+    return
+  }
+
+  if (type === 'session.reasoning.delta') {
+    const k = findStreamingKey()
+    if (k) {
+      const idx = messages.value.findIndex((m) => m.key === k)
+      if (idx !== -1) messages.value[idx].reasoning += data.delta || ''
+    }
+    return
+  }
+
+  if (type === 'session.text.delta') {
+    const k = findStreamingKey()
+    if (k) {
+      const idx = messages.value.findIndex((m) => m.key === k)
+      if (idx !== -1) messages.value[idx].text += data.delta || ''
+    }
+    return
+  }
+
+  if (type === 'session.tool.input.started' || type === 'session.tool.called') {
+    const k = findStreamingKey()
+    if (!k) return
+    const idx = messages.value.findIndex((m) => m.key === k)
+    if (idx === -1) return
+    const existing = messages.value[idx].tools.find((t) => t.id === data.id)
+    if (!existing) {
+      messages.value[idx].tools.push({
+        id: data.id,
+        name: data.name || 'tool',
+        input: data.input,
+        state: 'running',
+      })
+    } else {
+      existing.state = 'running'
+      if (data.input) existing.input = data.input
+    }
+    return
+  }
+
+  if (type === 'session.tool.called' && data.executed === false) {
+    // 等待权限/执行的工具
+    const k = findStreamingKey()
+    if (!k) return
+    const idx = messages.value.findIndex((m) => m.key === k)
+    if (idx !== -1) {
+      const existing = messages.value[idx].tools.find((t) => t.id === data.id)
+      if (!existing) {
+        messages.value[idx].tools.push({ id: data.id, name: data.name || 'tool', input: data.input, state: 'running' })
+      }
+    }
+    return
+  }
+
+  if (type === 'session.step.ended') {
+    finishStreaming()
+    return
+  }
+
+  if (type === 'session.execution.succeeded' || type === 'session.execution.failed') {
+    finishStreaming()
+    stopPolling()
+    return
+  }
+
+  if (type === 'permission.asked') {
+    handlePermission(data)
+    return
+  }
+
+  if (type === 'session.execution.started') {
+    running.value = true
+    return
+  }
+}
+
+function findStreamingKey() {
+  if (streamingKey) return streamingKey
+  const m = messages.value.find((x) => x.streaming)
+  if (m) {
+    streamingKey = m.key
+    return m.key
+  }
+  return null
+}
+
+// ---------- 权限 ----------
+
+function handlePermission(data) {
+  pendingPermId.value = data.id || ''
+  permRequest.value = {
+    action: data.action || 'shell',
+    resources: data.resources || [],
+  }
+  permVisible.value = true
+}
+
+async function replyPerm(decision) {
+  permVisible.value = false
+  try {
+    const resp = await fetch(`/api/ai/chat/sessions/${currentId.value}/permission/${pendingPermId.value}/reply`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` },
+      body: JSON.stringify({ decision }),
+    })
+    if (!resp.ok) {
+      ElMessage.error(`权限回复失败: HTTP ${resp.status}`)
+    }
+  } catch (e) {
+    ElMessage.error(`权限回复失败: ${e.message}`)
+  }
+  pendingPermId.value = ''
+}
+
+// ---------- 兜底轮询 ----------
+
+function startPolling() {
+  stopPolling()
+  pollTimer = setInterval(() => {
+    if (!currentId.value) return
+    const mySeq = ++pollSeq
+    getChatMessages(currentId.value).then((raw) => {
+      if (mySeq !== pollSeq) return
+      const list = (raw && Array.isArray(raw)) ? raw : []
+      const parsed = list.map(parseMessage).filter(Boolean)
+      // 保留流式中的 assistant 消息，用服务端最新内容覆盖其余
+      const hasStreaming = messages.value.some((m) => m.streaming)
+      if (hasStreaming) {
+        // 增量合并：仅更新已有的非流式消息 + 追加新消息
+        const existing = new Set(parsed.map((p) => p.key))
+        messages.value = [
+          ...parsed,
+          ...messages.value.filter((m) => m.streaming && !existing.has(m.key)),
+        ]
+      } else {
+        messages.value = parsed
+        const done = list.some((m) => m.type === 'idle' && (m.outcome === 'succeeded' || m.outcome === 'error'))
+        if (done) stopPolling()
+      }
+      scrollToBottom()
+    }).catch(() => {})
+  }, 3000)
+}
+
+function stopPolling() {
+  clearInterval(pollTimer)
+  pollTimer = null
+}
+
+// ---------- 工具 ----------
+
+function renderMd(text) {
+  if (!text) return ''
+  return marked.parse(text)
+}
+
+function formatToolInput(input) {
+  if (typeof input === 'string') return input
+  try { return JSON.stringify(input, null, 2) } catch { return String(input) }
+}
+
+function formatToolOutput(output) {
+  if (typeof output === 'string') return output
+  try { return JSON.stringify(output, null, 2) } catch { return String(output) }
+}
+
+function scrollToBottom() {
+  nextTick(() => {
+    if (msgListRef.value) {
+      msgListRef.value.scrollTop = msgListRef.value.scrollHeight
+    }
+  })
+}
 </script>
 
 <style scoped>
-.opencode-card {
-  height: calc(100vh - 120px);
+.chat-page {
+  height: calc(100vh - 60px);
+  display: flex;
+  background: #fff;
+  overflow: hidden;
+}
+
+/* 左侧会话列表 */
+.chat-sidebar {
+  width: 260px;
+  flex-shrink: 0;
+  border-right: 1px solid #e4e7ed;
+  display: flex;
+  flex-direction: column;
+  background: #f8f9fb;
+}
+.sidebar-header {
+  padding: 12px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid #e4e7ed;
+}
+.logo {
+  font-weight: 600;
+  font-size: 15px;
+}
+.session-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+}
+.session-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  margin-bottom: 2px;
+  transition: background 0.15s;
+}
+.session-item:hover {
+  background: #eef1f6;
+}
+.session-item.active {
+  background: #e6f0ff;
+  color: #2b6de8;
+}
+.session-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+.del-btn {
+  opacity: 0;
+  transition: opacity 0.15s;
+  color: #c0c4cc;
+}
+.session-item:hover .del-btn {
+  opacity: 1;
+}
+.del-btn:hover {
+  color: #f56c6c;
+}
+
+/* 右侧对话区 */
+.chat-main {
+  flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
 }
-.card-header {
+.msg-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px 24px;
+}
+.msg-row {
+  display: flex;
+  margin-bottom: 18px;
+  align-items: flex-start;
+}
+.msg-row.user {
+  justify-content: flex-end;
+}
+.user-bubble {
+  background: #2b6de8;
+  color: #fff;
+  padding: 10px 14px;
+  border-radius: 10px 10px 2px 10px;
+  max-width: 70%;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 14px;
+  line-height: 1.6;
+}
+.msg-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  background: #e6f0ff;
+  color: #2b6de8;
   display: flex;
   align-items: center;
-  gap: 10px;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 600;
+  flex-shrink: 0;
+  margin-right: 10px;
 }
-.frame-wrap {
-  flex: 1;
-  min-height: 0;
+.msg-body {
+  max-width: calc(100% - 42px);
+  min-width: 0;
 }
-.opencode-frame {
-  width: 100%;
-  height: 100%;
-  border: 1px solid #e5e7eb;
+.msg-system {
+  margin: 0 auto;
+  padding: 6px 14px;
+  background: #f4f4f5;
+  color: #909399;
   border-radius: 6px;
-  background: #fff;
+  font-size: 12px;
+}
+.reasoning {
+  margin-bottom: 8px;
+}
+.reasoning :deep(.el-collapse-item__header) {
+  font-size: 12px;
+  color: #909399;
+  height: 30px;
+  background: #fafafa;
+}
+.reasoning-text {
+  font-size: 12px;
+  color: #909399;
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 0;
+  max-height: 200px;
+  overflow-y: auto;
+}
+.tool-call {
+  margin: 6px 0;
+}
+.tool-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-family: 'Consolas', monospace;
+}
+.tool-state {
+  margin-left: 4px;
+}
+.tool-detail {
+  font-family: 'Consolas', 'Courier New', monospace;
+}
+.tool-block {
+  background: #f8f8f8;
+  border-radius: 4px;
+  padding: 8px;
+  margin-bottom: 6px;
+}
+.tool-block.error {
+  background: #fef0f0;
+}
+.tool-label {
+  font-size: 12px;
+  color: #909399;
+  margin-bottom: 4px;
+}
+.tool-block pre {
+  margin: 0;
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 220px;
+  overflow-y: auto;
+  color: #303133;
+}
+.markdown-body {
+  font-size: 14px;
+  line-height: 1.7;
+  word-break: break-word;
+}
+.typing .dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #2b6de8;
+  animation: blink 1s infinite;
+}
+@keyframes blink {
+  0%, 100% { opacity: 0.2; }
+  50% { opacity: 1; }
+}
+
+/* 输入区 */
+.chat-input {
+  border-top: 1px solid #e4e7ed;
+  padding: 12px 24px 16px;
+}
+.input-box {
+  border: 1px solid #dcdfe6;
+  border-radius: 8px;
+  padding: 8px;
+  transition: border-color 0.2s;
+}
+.input-box:focus-within {
+  border-color: #2b6de8;
+}
+.input-box :deep(.el-textarea__inner) {
+  border: none;
+  box-shadow: none;
+  padding: 4px 8px;
+}
+.input-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 6px;
+}
+.hint {
+  font-size: 12px;
+  color: #909399;
+}
+
+/* 权限弹窗 */
+.perm-content {
+  padding: 4px 0;
+}
+.perm-desc {
+  color: #606266;
+  margin: 0 0 10px;
+}
+.perm-action {
+  display: inline-block;
+  background: #f0f2f5;
+  padding: 4px 12px;
+  border-radius: 4px;
+  font-family: 'Consolas', monospace;
+  font-size: 13px;
+  margin-bottom: 8px;
+  color: #303133;
+}
+.perm-resources {
+  background: #f8f8f8;
+  border-radius: 4px;
+  padding: 10px;
+  margin: 0;
+  font-family: 'Consolas', monospace;
+  font-size: 12px;
+  color: #606266;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+:deep(.markdown-body pre) {
+  background: #f6f8fa;
+  padding: 12px;
+  border-radius: 6px;
+  overflow-x: auto;
+  font-size: 13px;
+  line-height: 1.5;
+}
+:deep(.markdown-body code) {
+  background: #f0f2f5;
+  padding: 2px 5px;
+  border-radius: 3px;
+  font-family: 'Consolas', monospace;
+  font-size: 13px;
+}
+:deep(.markdown-body pre code) {
+  background: transparent;
+  padding: 0;
+}
+:deep(.markdown-body p) {
+  margin: 0 0 8px;
+}
+:deep(.markdown-body ul, .markdown-body ol) {
+  padding-left: 20px;
+  margin: 0 0 8px;
+}
+:deep(.markdown-body table) {
+  border-collapse: collapse;
+  margin: 8px 0;
+}
+:deep(.markdown-body th, .markdown-body td) {
+  border: 1px solid #e4e7ed;
+  padding: 6px 10px;
+}
+:deep(.markdown-body h1, .markdown-body h2, .markdown-body h3, .markdown-body h4) {
+  margin: 12px 0 8px;
 }
 </style>

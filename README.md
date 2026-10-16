@@ -2,15 +2,16 @@
 
 > 让 AI 帮你锻造自己的毕设系统。
 
-**ThesisForge** 是一个开源的后台管理系统框架，核心卖点是内置 **AI 定制**能力：你在网页里通过嵌入的 OpenCode（AI 编程助手）直接让 AI 修改这个系统自身的源代码和样式，把一套通用后台逐步改造成你想要的业务系统。
+**ThesisForge** 是一个开源的后台管理系统框架，核心卖点是内置 **AI 定制**能力：你在网页的聊天界面里让 AI（OpenCode）直接修改这个系统自身的源代码和样式，把一套通用后台逐步改造成你想要的业务系统。
 
 面向**本科毕业设计 / 个人项目**：学生把自己的毕设想法告诉 AI，AI 将基础后台逐步改造成他想要的系统。
 
 ## ✨ 核心特性
 
-- **AI 定制模块**：网页内嵌入 OpenCode，AI 直接读写本项目源码
+- **AI 定制模块**：自研聊天界面驱动内嵌 OpenCode，AI 直接读写本项目源码；无需手动安装 opencode（`npm install` 自动下载二进制）
 - **进度计划 + 节点图**：AI 出分步方案 → 你确认 → 每完成一个子功能认定一个节点，全程留痕
 - **AI 能改前后端 + 数据库**：结构变更自动生成 Flyway 迁移脚本，可复现、可追踪
+- **会话隔离**：AI 会话绑定当前项目目录 + 独立数据库 + 会话级权限（只读放行 / 危险命令拒绝）
 - **基础后台开箱即用**：登录 + 用户 / 角色 / 菜单管理 + 日志
 
 ## 🧱 技术栈
@@ -19,7 +20,7 @@
 |---|---|
 | 前端 | Vue 3 + Element Plus + Vite |
 | 后端 | Spring Boot + Spring Security + JWT + MyBatis-Plus + Flyway |
-| AI 层 | Node 服务 + OpenCode (SDK / 官方 Web UI) |
+| AI 层 | Node 服务 + `@opencode/cli`（内嵌二进制，自研聊天界面） |
 | 数据库 | MySQL |
 
 ## 📁 仓库结构
@@ -29,7 +30,7 @@ ThesisForge/
 ├─ frontend/        Vue 3 + Element Plus 前端
 ├─ backend/         Spring Boot 后端
 │  └─ src/main/resources/db/migration/   Flyway 迁移脚本
-├─ bridge/          Node 服务（托管 OpenCode）
+├─ bridge/          Node 服务（托管 opencode serve + git 操作）
 ├─ docs/            DESIGN.md 设计文档
 ├─ LICENSE          MIT
 └─ README.md
@@ -44,9 +45,13 @@ ThesisForge/
 git clone <repo-url>
 cd ThesisForge
 
-# 2. 启动后端（详见 backend/README.md）
-# 3. 启动前端（详见 frontend/README.md）
-# 4. 启动 bridge（详见 bridge/README.md）
+# 2. 安装并启动 bridge（首次安装会自动下载 opencode 二进制，约 213MB）
+cd bridge
+npm install
+npm start
+
+# 3. 启动后端（详见 backend/README.md）
+# 4. 启动前端（详见 frontend/README.md）
 ```
 
 完整设计见 [docs/DESIGN.md](docs/DESIGN.md)。

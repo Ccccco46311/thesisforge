@@ -5,12 +5,23 @@ import { promisify } from 'node:util'
 import path from 'node:path'
 import fs from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
+import {
+  ensureServer,
+  stopServer,
+  createSession,
+  listSessions,
+  prompt,
+  getMessages,
+  deleteSession,
+  applyProvider,
+  openEventStream,
+  replyPermission,
+  PROJECT_ROOT,
+  DEFAULT_PERMISSIONS,
+} from './opencode.js'
 
 const execFileAsync = promisify(execFile)
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-
-// 项目根目录（bridge 的上级目录）
-const PROJECT_ROOT = path.resolve(__dirname, '..')
 
 const app = express()
 const PORT = process.env.BRIDGE_PORT || 3010
@@ -88,48 +99,198 @@ app.get('/git/status', async (req, res) => {
 
 /**
  * POST /provider/apply
- * body: { provider, apiKey, baseUrl, model, dbHost, dbPort, dbName, dbUser, dbPassword, opencodeUrl }
- * 将 AI 供应商配置写入 bridge/opencode.json（OpenCode 配置文件）。
+ * body: { provider, apiKey, baseUrl, model, dbHost, dbPort, dbName, dbUser, dbPassword, opencodeUrl, name }
+ * 将 AI 供应商配置保存到 data/opencode/provider.json，并重启 serve 使配置生效。
  */
 app.post('/provider/apply', async (req, res) => {
   try {
     const config = req.body || {}
-    const opencodeConfigPath = path.join(__dirname, 'opencode.json')
-
-    // 读取已有配置（若存在）
-    let existing = {}
-    try {
-      existing = JSON.parse(await fs.readFile(opencodeConfigPath, 'utf8'))
-    } catch {
-      // 首次写入
-    }
-
-    // 组装 provider 配置（OpenCode 兼容：provider id 与 baseURL）
-    const providerId = config.provider || 'deepseek'
-    const providerConfig = {
-      id: providerId,
+    await applyProvider({
+      provider: config.provider || 'custom',
       apiKey: config.apiKey || '',
-      baseURL: config.baseUrl || '',
-      models: config.model ? [{ id: config.model }] : [],
-    }
-
-    const merged = {
-      ...existing,
-      provider: {
-        ...(existing.provider || {}),
-        [providerId]: providerConfig,
-      },
-      model: config.model || existing.model || 'deepseek-chat',
-    }
-
-    await fs.writeFile(opencodeConfigPath, JSON.stringify(merged, null, 2), 'utf8')
-    res.json({ code: 200, msg: 'ok', data: { written: opencodeConfigPath } })
+      baseUrl: config.baseUrl || '',
+      model: config.model || '',
+      name: config.name || config.provider || 'custom',
+    })
+    res.json({ code: 200, msg: 'ok', data: { applied: true } })
   } catch (e) {
-    res.status(500).json({ code: 500, msg: `写入 OpenCode 配置失败: ${e.message}`, data: null })
+    res.status(500).json({ code: 500, msg: `应用 OpenCode 配置失败: ${e.message}`, data: null })
   }
 })
 
-app.listen(PORT, () => {
-  console.log(`[bridge] ThesisForge bridge listening on http://localhost:${PORT}`)
-  console.log(`[bridge] Project root: ${PROJECT_ROOT}`)
+// ---------- OpenCode 会话 API ----------
+
+/**
+ * GET /api/opencode/status
+ * 返回 serve 运行状态。
+ */
+app.get('/api/opencode/status', async (req, res) => {
+  try {
+    const { url } = await ensureServer()
+    res.json({ code: 200, msg: 'ok', data: { running: true, url, projectRoot: PROJECT_ROOT } })
+  } catch (e) {
+    res.status(500).json({ code: 500, msg: `OpenCode serve 未就绪: ${e.message}`, data: null })
+  }
 })
+
+/**
+ * GET /api/opencode/sessions
+ * 列出当前项目的 session（目录过滤）。
+ */
+app.get('/api/opencode/sessions', async (req, res) => {
+  try {
+    const sessions = await listSessions()
+    res.json({ code: 200, msg: 'ok', data: sessions })
+  } catch (e) {
+    res.status(500).json({ code: 500, msg: `获取会话列表失败: ${e.message}`, data: null })
+  }
+})
+
+/**
+ * POST /api/opencode/sessions
+ * body: { title, model, agent, permissions }
+ * 创建会话（绑定项目目录 + 默认权限规则集）。
+ */
+app.post('/api/opencode/sessions', async (req, res) => {
+  try {
+    const body = req.body || {}
+    const session = await createSession({
+      title: body.title,
+      model: body.model,
+      agent: body.agent,
+      permissions: body.permissions || DEFAULT_PERMISSIONS,
+    })
+    res.json({ code: 200, msg: 'ok', data: session })
+  } catch (e) {
+    res.status(500).json({ code: 500, msg: `创建会话失败: ${e.message}`, data: null })
+  }
+})
+
+/**
+ * POST /api/opencode/sessions/:id/prompt
+ * body: { text }
+ * 发送消息。
+ */
+app.post('/api/opencode/sessions/:id/prompt', async (req, res) => {
+  try {
+    const text = req.body?.text
+    if (!text) {
+      return res.status(400).json({ code: 400, msg: 'text 不能为空', data: null })
+    }
+    const result = await prompt(req.params.id, text)
+    res.json({ code: 200, msg: 'ok', data: result })
+  } catch (e) {
+    res.status(500).json({ code: 500, msg: `发送消息失败: ${e.message}`, data: null })
+  }
+})
+
+/**
+ * GET /api/opencode/sessions/:id/message
+ * 读取会话消息。
+ */
+app.get('/api/opencode/sessions/:id/message', async (req, res) => {
+  try {
+    const messages = await getMessages(req.params.id)
+    res.json({ code: 200, msg: 'ok', data: messages })
+  } catch (e) {
+    res.status(500).json({ code: 500, msg: `读取消息失败: ${e.message}`, data: null })
+  }
+})
+
+/**
+ * POST /api/opencode/sessions/:id/permission/:requestId/reply
+ * body: { decision: 'once'|'always'|'reject' }
+ * 回复权限请求（shell ask 弹窗）。
+ */
+app.post('/api/opencode/sessions/:id/permission/:requestId/reply', async (req, res) => {
+  try {
+    const decision = req.body?.decision
+    if (!['once', 'always', 'reject'].includes(decision)) {
+      return res.status(400).json({ code: 400, msg: 'decision 必须为 once/always/reject', data: null })
+    }
+    await replyPermission(req.params.id, req.params.requestId, decision)
+    res.json({ code: 200, msg: 'ok', data: true })
+  } catch (e) {
+    res.status(500).json({ code: 500, msg: `回复权限请求失败: ${e.message}`, data: null })
+  }
+})
+
+/**
+ * DELETE /api/opencode/sessions/:id
+ * 删除会话。
+ */
+app.delete('/api/opencode/sessions/:id', async (req, res) => {
+  try {
+    await deleteSession(req.params.id)
+    res.json({ code: 200, msg: 'ok', data: true })
+  } catch (e) {
+    res.status(500).json({ code: 500, msg: `删除会话失败: ${e.message}`, data: null })
+  }
+})
+
+/**
+ * GET /api/opencode/events
+ * SSE 事件流：代理 serve 的 /api/event，向浏览器实时推送会话事件。
+ */
+app.get('/api/opencode/events', async (req, res) => {
+  try {
+    const upstream = await openEventStream()
+    if (!upstream.ok) {
+      res.status(502).json({ code: 502, msg: `上游事件流失败: HTTP ${upstream.status}`, data: null })
+      return
+    }
+    res.setHeader('Content-Type', 'text/event-stream')
+    res.setHeader('Cache-Control', 'no-cache')
+    res.setHeader('Connection', 'keep-alive')
+    res.setHeader('X-Accel-Buffering', 'no')
+    res.flushHeaders?.()
+
+    const reader = upstream.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+
+    const pump = async () => {
+      try {
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          buffer += decoder.decode(value, { stream: true })
+          const lines = buffer.split('\n')
+          buffer = lines.pop()
+          for (const line of lines) {
+            if (line.trim()) res.write(line + '\n')
+          }
+        }
+        if (buffer.trim()) res.write(buffer + '\n')
+        res.end()
+      } catch (e) {
+        console.error(`[bridge] SSE 转发中断: ${e.message}`)
+        res.end()
+      }
+    }
+
+    req.on('close', () => {
+      reader.cancel().catch(() => {})
+    })
+
+    pump()
+  } catch (e) {
+    res.status(500).json({ code: 500, msg: `事件流失败: ${e.message}`, data: null })
+  }
+})
+
+// ---------- 启动 ----------
+
+async function main() {
+  // 启动 OpenCode serve（失败不阻塞 bridge，仅打日志）
+  ensureServer().catch((e) => {
+    console.error(`[bridge] OpenCode serve 启动失败: ${e.message}`)
+  })
+
+  app.listen(PORT, () => {
+    console.log(`[bridge] ThesisForge bridge listening on http://localhost:${PORT}`)
+    console.log(`[bridge] Project root: ${PROJECT_ROOT}`)
+  })
+}
+
+main()

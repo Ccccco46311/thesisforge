@@ -31,7 +31,6 @@
 ### Non-goals（v1 不做）
 - **不做版本回退/丢弃**：节点图 v1 仅做路径记录，点击旧节点只查看，不切换、不丢弃。
 - 不做多人协作、租户、复杂数据权限。
-- 不做 OpenCode 界面的深度定制（v1 直接 iframe 嵌入官方 Web UI）。
 - 不做生产环境部署方案（v1 面向本机开发）。
 
 ### Anti-goals（绝对不做）
@@ -42,11 +41,11 @@
 
 | 层 | 技术 | 说明 |
 |---|---|---|
-| 前端 | Vue 3 + Element Plus | 管理后台 UI |
+| 前端 | Vue 3 + Element Plus | 管理后台 UI（含自研 AI 聊天界面） |
 | 后端 | Spring Boot（v1 单体） | 预留微服务边界，后期可演进 Spring Cloud |
-| AI 层 | Node 服务（bridge）+ OpenCode SDK / 官方 Web UI | 托管 OpenCode，iframe 嵌入 |
+| AI 层 | Node 服务（bridge）+ `@opencode/cli`（内嵌二进制） | 托管独立 opencode serve，自研聊天界面驱动 |
 | 数据库 | MySQL（v1） | AI 改动通过 Flyway 迁移脚本版本化 |
-| 构建 | Maven（后端）+ Vite（前端）+ pnpm（bridge） | |
+| 构建 | Maven（后端）+ Vite（前端）+ npm（bridge） | |
 | 许可证 | MIT | |
 
 ## 5. 整体架构
@@ -54,22 +53,39 @@
 ```
 ┌─────────────── Vue 3 + Element Plus 前端 ───────────────┐
 │  系统管理                     AI定制                       │
-│  用户/角色/菜单/日志            ·供应商配置 ──→ 写 opencode.json
-│                              ·进度计划+节点图 ──→ Spring API
-│                              ·OpenCode 开发界面(iframe)
+│  用户/角色/菜单/日志            ·供应商配置 ──→ 同步 bridge   │
+│                              ·进度计划+节点图 ──→ Spring API │
+│                              ·AI 开发(自研聊天界面)         │
 └────────┬──────────────────────────────┬──────────────┘
-         │ /api (Spring)                │ WebSocket (opencode)
+         │ /api (Spring, JWT)           │ SSE 事件流
 ┌────────┴──────────┐        ┌──────────┴───────────┐
 │ Spring Boot       │        │ Node bridge           │
-│ ·用户/角色/菜单/日志 │        │ ·托管 OpenCode server  │
+│ ·用户/角色/菜单/日志 │        │ ·托管 opencode serve   │
 │ ·进度计划/节点 数据表│        │ ·git 工作区操作          │
-│ ·Flyway 迁移管理    │        │ ·应用供应商配置          │
-└───────────────────┘        └──────────────────────┘
+│ ·AI 会话记录表      │        │ ·应用供应商配置          │
+│ ·SSE 事件代理       │        │ ·OpenCode API 封装     │
+└───────────────────┘        └──────────┬────────────┘
+                                         │ spawn + Basic Auth
+                              ┌──────────┴───────────┐
+                              │ 独立 opencode serve    │
+                              │ ·工作目录 = 项目根      │
+                              │ ·独立库 data/opencode/ │
+                              │ ·会话级权限规则集        │
+                              └──────────────────────┘
           │  共享同一个 monorepo 源码目录（本机开发环境）
           └── AI 改这里的代码 → Vite/SpringDevTools 热更新生效
 ```
 
-**关键设计决策**：OpenCode server 和 Spring 后端操作的是**同一个源码目录**。AI 修改 Vue/Java 文件后，前端 Vite 秒级热更、后端 Spring DevTools 热重载，用户立即看到效果。
+**关键设计决策**：opencode server 和 Spring 后端操作的是**同一个源码目录**。AI 修改 Vue/Java 文件后，前端 Vite 秒级热更、后端 Spring DevTools 热重载，用户立即看到效果。
+
+**OpenCode 内嵌与隔离（方案 B）**：
+- `@opencode/cli` 作为 bridge 的 npm 依赖，`npm install` 时 postinstall 自动下载平台二进制（Windows x64），用户无需手动安装 opencode。
+- bridge 启动时 spawn 一个**独立的 `opencode serve`**，工作目录为项目根，固定端口、仅监听 127.0.0.1。
+- **数据库隔离**：`OPENCODE_DB` 指向项目内 `data/opencode/opencode.db`（gitignore），与全局 opencode 会话库物理隔离。
+- **认证**：`OPENCODE_SERVER_PASSWORD` 随机密码 + Basic Auth，不依赖全局服务配对。
+- **会话绑定项目**：创建 session 显式传 `location: {directory: 项目根}`，列表按目录过滤。
+- **会话级权限**：创建 session 时注入权限规则集——git 只读命令自动放行、其余 shell 询问用户、危险命令/外部目录拒绝。
+- **供应商配置注入**：数据库配置通过 `OPENCODE_CONFIG_CONTENT` 注入 serve 进程（不写项目级 opencode.json，避免影响开发机全局实例）。
 
 ## 6. 模块设计
 
@@ -92,10 +108,12 @@
 - 保存后写入 Node bridge 侧的 opencode 配置（并重启 OpenCode server 生效）。
 - 安全提示：key 本地存储，明文展示可选。
 
-**子页面 B：OpenCode 开发界面**
-- iframe 嵌入 OpenCode 官方 Web UI（方案 A，v1 采用）。
-- 通过 CORS + 密码 cookie 完成认证衔接。
-- 后续（v2）可升级为自绘 TUI 风格界面（方案 B）。
+**子页面 B：AI 开发（OpenCode 聊天界面）**
+- 自研聊天界面替代 iframe：左侧会话列表（仅本项目会话）+ 右侧对话区。
+- 消息以 Markdown 渲染，推理过程与工具调用折叠展示。
+- SSE 实时推送 AI 回复（`session.text.delta` 流式增量），兜底轮询 `GET messages`。
+- 权限确认弹窗：AI 请求执行 shell 时按规则 allow/ask/deny，ask 时前端弹窗确认。
+- 会话记录额外存 `ai_chat_session`（Flyway V4 迁移）。
 
 **子页面 C：进度计划 & 节点图**
 - 展示当前进度计划的步骤列表。
@@ -171,7 +189,9 @@ ai_node        节点        ← 点"完成" → git commit + 元数据记录
 ## 10. 认证与安全
 
 - 后台登录：Spring Security + JWT（v1 单个管理员账号即可）。
-- OpenCode server 认证：官方自带密码认证，配置页填入服务地址和密码，iframe 通过 cookie 免登录。
+- OpenCode serve 认证：独立 serve 使用 `OPENCODE_SERVER_PASSWORD` 随机密码 + Basic Auth（不依赖全局服务配对）。
+- 会话权限规则集：git 只读命令自动放行、其余 shell 询问用户、危险命令/项目外目录拒绝。
+- 数据库隔离：独立 serve 用项目内 `data/opencode/opencode.db`，看不到其他项目的历史会话。
 - API key 本地存储，不上传任何服务。
 
 **目标运行环境（v1 决策）**：以 **Windows 原生**为目标平台（国内本科生绝大多数是 Windows）。bridge 层做平台无关的启动封装；README 将安装 WSL2 作为可选增强项（OpenCode 在 WSL 下运行更稳），但不作为前置要求。
@@ -183,7 +203,7 @@ ThesisForge/
 ├─ frontend/        Vue 3 + Element Plus 前端
 ├─ backend/         Spring Boot 后端
 │  └─ src/main/resources/db/migration/   Flyway 迁移脚本
-├─ bridge/          Node 服务（托管 OpenCode）
+├─ bridge/          Node 服务（托管 opencode serve + git 操作）
 ├─ docs/            DESIGN.md 等文档
 ├─ LICENSE          MIT
 └─ README.md        项目介绍 + 快速开始
@@ -201,10 +221,11 @@ ThesisForge/
 - 登录（Spring Security + JWT）。
 - 用户/角色/菜单管理，动态菜单。
 
-### 阶段 2：OpenCode 嵌入
-- bridge 托管 OpenCode server。
-- AI 供应商配置页 → 写配置 → 重启生效。
-- iframe 嵌入官方 Web UI，认证衔接。
+### 阶段 2：OpenCode 嵌入（自研聊天界面）
+- bridge 托管独立 opencode serve（`@opencode/cli` 内嵌二进制 + 独立库 + 会话权限）。
+- AI 供应商配置页 → 同步 bridge → 注入 serve 生效。
+- 自研聊天界面：会话列表 + 对话区 + Markdown + 工具折叠 + 权限确认 + SSE 流式。
+- 会话记录存 `ai_chat_session` 表。
 
 ### 阶段 3：进度计划 & 节点图
 - AI 方案 → 进度计划数据表。
@@ -226,6 +247,5 @@ ThesisForge/
 - 具体表结构（users/roles/menus/plans/nodes 字段明细）。
 - Spring Boot 工程内部包结构。
 - bridge 与 Spring 的通信协议细节（REST 接口定义）。
-- iframe 嵌入时的具体 CORS/认证配置参数。
 - Flyway 迁移脚本生成的辅助机制（提示 AI 的指令模板）。
 - 计划上下文注入提示词的具体格式（bridge 侧实现）。
