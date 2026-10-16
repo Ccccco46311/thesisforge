@@ -83,29 +83,35 @@ const pageTitle = computed(() => route.meta.title || '')
  * 由后端返回的菜单树计算侧边栏层级。
  * 后端返回的是扁平化的 menuType: M(目录)/C(菜单)，已按 parentId 构建好树。
  */
-const menuTree = computed(() => {
-  const menus = userStore.menus || []
-  // 过滤出真正的叶子菜单（C 菜单）与目录（M 目录）
-  const hasChild = (m) => menus.some((c) => c.parentId === m.id)
-  return menus
-    .filter((m) => m.parentId === 0)
-    .map((m) => ({
-      ...m,
-       children: menus.filter((c) => c.parentId === m.id),
-     }))
-    .filter((m) => m.menuType !== 'F' && (hasChild(m) || m.menuType === 'C'))
-})
+/**
+ * 菜单树：后端登录接口已按 parentId 构建好嵌套树，直接使用。
+ * 根节点：menuType=M(目录，带 children) 或 C(叶子菜单)。
+ */
+const menuTree = computed(() => userStore.menus || [])
 
 /**
  * 生成菜单的完整路由路径：父级 path + '/' + 子级 path。
+ * 在后端返回的嵌套树中查找父级。
  */
 function menuPath(menu) {
   if (menu.parentId === 0) {
     return menu.path ? `/${menu.path}` : '/'
   }
-  const parent = (userStore.menus || []).find((m) => m.id === menu.parentId)
+  const parent = findInTree(userStore.menus || [], menu.parentId)
   const parentPath = parent && parent.path ? parent.path : ''
   return `/${parentPath}/${menu.path}`.replace(/\/+/g, '/')
+}
+
+/** 在嵌套菜单树中按 id 查找节点 */
+function findInTree(tree, id) {
+  for (const node of tree) {
+    if (node.id === id) return node
+    if (node.children && node.children.length) {
+      const found = findInTree(node.children, id)
+      if (found) return found
+    }
+  }
+  return null
 }
 
 async function handleCommand(command) {
