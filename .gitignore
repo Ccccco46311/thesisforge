@@ -29,3 +29,7 @@ Thumbs.db
 
 # ---- Runtime data ----
 data/
+
+# ---- Bridge runtime config (contains API keys) ----
+bridge/src/opencode.json
+bridge/opencode.json
