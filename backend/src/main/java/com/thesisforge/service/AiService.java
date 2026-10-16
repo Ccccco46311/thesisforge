@@ -56,6 +56,7 @@ public class AiService {
 
     public void saveProviderConfig(ProviderConfigDTO dto) {
         AiProviderConfig config = providerConfigMapper.selectById(1L);
+        boolean isNew = (config == null);
         if (config == null) {
             config = new AiProviderConfig();
             config.setId(1L);
@@ -71,7 +72,7 @@ public class AiService {
         config.setDbPassword(dto.getDbPassword());
         config.setOpencodeUrl(dto.getOpencodeUrl());
 
-        if (config.getId() == null) {
+        if (isNew) {
             providerConfigMapper.insert(config);
         } else {
             providerConfigMapper.updateById(config);

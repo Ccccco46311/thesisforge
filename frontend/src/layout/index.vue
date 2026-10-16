@@ -14,48 +14,29 @@
         active-text-color="#ffffff"
         class="menu"
       >
-        <el-menu-item index="/dashboard">
-          <el-icon><HomeFilled /></el-icon>
-          <span>首页</span>
-        </el-menu-item>
-
-        <el-sub-menu index="system">
-          <template #title>
-            <el-icon><Setting /></el-icon>
-            <span>系统管理</span>
-          </template>
-          <el-menu-item index="/system/user">
-            <el-icon><User /></el-icon>
-            <span>用户管理</span>
+        <!-- 动态菜单：由后端登录接口返回的菜单树渲染 -->
+        <template v-for="item in menuTree" :key="item.id">
+          <!-- 目录/有子菜单 -->
+          <el-sub-menu v-if="item.children && item.children.length" :index="String(item.id)">
+            <template #title>
+              <el-icon v-if="item.icon"><component :is="item.icon" /></el-icon>
+              <span>{{ item.menuName }}</span>
+            </template>
+            <el-menu-item
+              v-for="child in item.children"
+              :key="child.id"
+              :index="menuPath(child)"
+            >
+              <el-icon v-if="child.icon"><component :is="child.icon" /></el-icon>
+              <span>{{ child.menuName }}</span>
+            </el-menu-item>
+          </el-sub-menu>
+          <!-- 单菜单 -->
+          <el-menu-item v-else :index="menuPath(item)">
+            <el-icon v-if="item.icon"><component :is="item.icon" /></el-icon>
+            <span>{{ item.menuName }}</span>
           </el-menu-item>
-          <el-menu-item index="/system/role">
-            <el-icon><Avatar /></el-icon>
-            <span>角色管理</span>
-          </el-menu-item>
-          <el-menu-item index="/system/menu">
-            <el-icon><Menu /></el-icon>
-            <span>菜单管理</span>
-          </el-menu-item>
-        </el-sub-menu>
-
-        <el-sub-menu index="ai">
-          <template #title>
-            <el-icon><MagicStick /></el-icon>
-            <span>AI定制</span>
-          </template>
-          <el-menu-item index="/ai/config">
-            <el-icon><Connection /></el-icon>
-            <span>供应商配置</span>
-          </el-menu-item>
-          <el-menu-item index="/ai/opencode">
-            <el-icon><ChatDotRound /></el-icon>
-            <span>AI 开发</span>
-          </el-menu-item>
-          <el-menu-item index="/ai/progress">
-            <el-icon><List /></el-icon>
-            <span>进度计划</span>
-          </el-menu-item>
-        </el-sub-menu>
+        </template>
       </el-menu>
     </el-aside>
 
@@ -97,6 +78,35 @@ const userStore = useUserStore()
 
 const activeMenu = computed(() => route.path)
 const pageTitle = computed(() => route.meta.title || '')
+
+/**
+ * 由后端返回的菜单树计算侧边栏层级。
+ * 后端返回的是扁平化的 menuType: M(目录)/C(菜单)，已按 parentId 构建好树。
+ */
+const menuTree = computed(() => {
+  const menus = userStore.menus || []
+  // 过滤出真正的叶子菜单（C 菜单）与目录（M 目录）
+  const hasChild = (m) => menus.some((c) => c.parentId === m.id)
+  return menus
+    .filter((m) => m.parentId === 0)
+    .map((m) => ({
+      ...m,
+       children: menus.filter((c) => c.parentId === m.id),
+     }))
+    .filter((m) => m.menuType !== 'F' && (hasChild(m) || m.menuType === 'C'))
+})
+
+/**
+ * 生成菜单的完整路由路径：父级 path + '/' + 子级 path。
+ */
+function menuPath(menu) {
+  if (menu.parentId === 0) {
+    return menu.path ? `/${menu.path}` : '/'
+  }
+  const parent = (userStore.menus || []).find((m) => m.id === menu.parentId)
+  const parentPath = parent && parent.path ? parent.path : ''
+  return `/${parentPath}/${menu.path}`.replace(/\/+/g, '/')
+}
 
 async function handleCommand(command) {
   if (command === 'logout') {
