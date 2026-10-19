@@ -27,11 +27,15 @@ request.interceptors.response.use(
     return res.data
   },
   (error) => {
-    if (error.response?.status === 401) {
+    const status = error.response?.status
+    if (status === 401 || status === 403) {
+      // 401：token 缺失/过期；403：无权限（含旧版本后端对无效 token 返回 403 的兼容）
       localStorage.removeItem('token')
       localStorage.removeItem('user')
-      router.push('/login')
-      ElMessage.warning('登录已过期，请重新登录')
+      if (router.currentRoute.value.path !== '/login') {
+        router.push('/login')
+        ElMessage.warning('登录已过期，请重新登录')
+      }
     } else {
       ElMessage.error(error.response?.data?.msg || error.message || '网络错误')
     }

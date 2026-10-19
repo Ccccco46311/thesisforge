@@ -167,6 +167,7 @@ import {
   getChatPermissions,
 } from '@/api/opencode'
 import { getProviderConfig } from '@/api/ai'
+import router from '@/router'
 
 // ---------- 状态 ----------
 const sessions = ref([])
@@ -405,6 +406,15 @@ function connectSse() {
     signal: sseController.signal,
   })
     .then((resp) => {
+      if (resp.status === 401 || resp.status === 403) {
+        // 登录态失效：停止重连并跳转登录页
+        sseAborted = true
+        localStorage.removeItem('token')
+        localStorage.removeItem('user')
+        ElMessage.warning('登录已过期，请重新登录')
+        router.push('/login')
+        throw new Error(`SSE HTTP ${resp.status}`)
+      }
       if (!resp.ok) throw new Error(`SSE HTTP ${resp.status}`)
       return resp.body.getReader()
     })

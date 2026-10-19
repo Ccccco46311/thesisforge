@@ -63,10 +63,11 @@ const router = createRouter({
   ],
 })
 
-// 全局前置守卫：未登录跳转登录页
+// 全局前置守卫：未登录或 token 已过期跳转登录页
 router.beforeEach((to, from, next) => {
   const userStore = useUserStore()
   if (to.path !== '/login' && !userStore.isLogin) {
+    userStore.logout() // 清理过期 token，避免残留
     next('/login')
   } else {
     next()

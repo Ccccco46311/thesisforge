@@ -1,8 +1,12 @@
 package com.thesisforge.security;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.thesisforge.common.Result;
+import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.MediaType;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
@@ -17,6 +21,7 @@ import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 /**
@@ -39,8 +44,29 @@ public class SecurityConfig {
                         .requestMatchers("/api/auth/login", "/api/auth/register").permitAll()
                         .requestMatchers("/error").permitAll()
                         .anyRequest().authenticated())
+                // 未认证 / token 无效或过期：返回 401 + 统一 JSON（Spring Security 默认返回 403，会让前端误判为无权限）
+                .exceptionHandling(ex -> ex
+                        .authenticationEntryPoint((req, resp, e) ->
+                                writeJson(resp, HttpServletResponse.SC_UNAUTHORIZED, 401, "登录已过期，请重新登录"))
+                        .accessDeniedHandler((req, resp, e) ->
+                                writeJson(resp, HttpServletResponse.SC_FORBIDDEN, 403, "没有访问权限")))
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
         return http.build();
+    }
+
+    /**
+     * 输出统一 JSON 响应（用于安全过滤器层，此时尚未进入 Controller）。
+     */
+    private static void writeJson(HttpServletResponse response, int httpStatus, int code, String msg) {
+        try {
+            response.setStatus(httpStatus);
+            response.setCharacterEncoding(StandardCharsets.UTF_8.name());
+            response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+            ObjectMapper mapper = new ObjectMapper();
+            response.getWriter().write(mapper.writeValueAsString(Result.fail(code, msg)));
+        } catch (Exception ignored) {
+            // 响应已提交等场景，忽略
+        }
     }
 
     @Bean
