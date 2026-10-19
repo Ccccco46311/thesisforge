@@ -21,8 +21,14 @@ request.interceptors.response.use(
   (response) => {
     const res = response.data
     if (res.code !== 200) {
-      ElMessage.error(res.msg || '请求失败')
-      return Promise.reject(new Error(res.msg || '请求失败'))
+      // _silent：由调用方自行处理（例如「文档尚未生成」属正常状态）
+      if (!response.config?._silent) {
+        ElMessage.error(res.msg || '请求失败')
+      }
+      const err = new Error(res.msg || '请求失败')
+      err.code = res.code
+      err.msg = res.msg
+      return Promise.reject(err)
     }
     return res.data
   },

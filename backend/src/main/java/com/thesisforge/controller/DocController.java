@@ -53,7 +53,8 @@ public class DocController {
                 throw new BusinessException("非法路径");
             }
             if (!Files.exists(target)) {
-                throw new BusinessException("文档尚未生成：" + normalized);
+                // 404：文档还没生成（属于正常状态，不是系统错误）
+                throw new BusinessException(404, "文档尚未生成：" + normalized);
             }
             String content = Files.readString(target, StandardCharsets.UTF_8);
             return Result.ok(content);

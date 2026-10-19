@@ -16,8 +16,8 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(BusinessException.class)
     public Result<Void> handleBusiness(BusinessException e) {
-        log.warn("业务异常: {}", e.getMessage());
-        return Result.fail(e.getMessage());
+        log.warn("业务异常[{}]: {}", e.getCode(), e.getMessage());
+        return Result.fail(e.getCode(), e.getMessage());
     }
 
     @ExceptionHandler({MethodArgumentNotValidException.class, BindException.class})

@@ -176,7 +176,7 @@
           </el-tag>
         </div>
         <div class="doc-content">
-          <DocPreview :path="currentStage?.outputPath || ''" />
+          <DocPreview :key="docKey" :path="docPath" :placeholder="docPlaceholder" />
         </div>
       </div>
     </div>
@@ -205,7 +205,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
@@ -245,6 +245,31 @@ const isLastStage = computed(() => {
   if (!pipeline.value || !currentStage.value) return false
   return currentStage.value.stageCode === 'acceptance'
 })
+
+/**
+ * 右侧产出文档路径：未开始的阶段不发起请求，避免「文档尚未生成」打扰。
+ */
+const docPath = computed(() => {
+  const s = currentStage.value
+  if (!s || !s.outputPath) return ''
+  if (s.status === 'pending') return ''
+  return s.outputPath
+})
+
+/**
+ * 产出区占位文案：按阶段状态区分「未开始 / 生成中 / 无产出要求」。
+ */
+const docPlaceholder = computed(() => {
+  const s = currentStage.value
+  if (!s) return '流水线已全部完成'
+  if (!s.outputPath) return '本阶段不要求产出文档，进度可在「进度计划」页查看'
+  if (s.status === 'pending') return '本阶段尚未开始，AI 产出文档会显示在这里'
+  if (s.status === 'running') return 'AI 正在生成产出文档，完成后点「刷新」查看'
+  return '本阶段未产出文档'
+})
+
+/** 变更时强制 DocPreview 重新加载（AI 执行结束后自动刷新产出） */
+const docKey = ref(0)
 
 const statusText = computed(() => {
   const s = pipeline.value?.status
@@ -398,6 +423,13 @@ function goAlmighty() {
 }
 
 // ---------- 生命周期 ----------
+
+// AI 每轮执行结束（idle 由 false → true）时刷新产出文档
+watch(idle, (now, before) => {
+  if (now && !before) {
+    docKey.value++
+  }
+})
 
 onMounted(async () => {
   mount()
