@@ -31,6 +31,7 @@ public class AiChatService {
 
     /**
      * 会话列表：以 bridge 返回为准，并同步补录到本库。
+     * 流水线阶段会话（标题以 [流水线] 开头）不出现在自由聊天列表中。
      */
     public List<ChatSessionVO> listSessions() {
         JsonNode sessions = bridgeClient.listChatSessions();
@@ -42,10 +43,21 @@ public class AiChatService {
                     continue;
                 }
                 syncSessionRecord(sessionId, s);
+                if (isPipelineSession(s)) {
+                    continue;
+                }
                 result.add(toVO(s));
             }
         }
         return result;
+    }
+
+    /**
+     * 是否为流水线阶段会话（由 AiPipelineService 创建，标题带 [流水线] 前缀）。
+     */
+    private boolean isPipelineSession(JsonNode s) {
+        String title = s.path("title").asText("");
+        return title.startsWith("[流水线]");
     }
 
     /**
