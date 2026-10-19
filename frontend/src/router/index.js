@@ -47,6 +47,12 @@ const router = createRouter({
           meta: { title: 'AI 供应商配置' },
         },
         {
+          path: 'ai/pipeline',
+          name: 'AIPipeline',
+          component: () => import('@/views/ai/pipeline/index.vue'),
+          meta: { title: 'AI 流水线' },
+        },
+        {
           path: 'ai/opencode',
           name: 'AIOpencode',
           component: () => import('@/views/ai/opencode/index.vue'),

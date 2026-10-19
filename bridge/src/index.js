@@ -10,6 +10,7 @@ import {
   stopServer,
   createSession,
   listSessions,
+  listAgents,
   prompt,
   getMessages,
   deleteSession,
@@ -120,6 +121,19 @@ app.post('/provider/apply', async (req, res) => {
 })
 
 // ---------- OpenCode 会话 API ----------
+
+/**
+ * GET /api/opencode/agents
+ * 列出 OpenCode 当前可用的 agent（用于确认流水线 agent 是否注入成功）。
+ */
+app.get('/api/opencode/agents', async (req, res) => {
+  try {
+    const agents = await listAgents()
+    res.json({ code: 200, msg: 'ok', data: agents })
+  } catch (e) {
+    res.status(500).json({ code: 500, msg: `获取 agent 列表失败: ${e.message}`, data: null })
+  }
+})
 
 /**
  * GET /api/opencode/status

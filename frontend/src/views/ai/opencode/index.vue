@@ -1,5 +1,17 @@
 <template>
-  <div class="chat-page">
+  <div v-if="locked" class="locked-page">
+    <el-result icon="warning" title="流水线尚未完成">
+      <template #sub-title>
+        <p>「AI 开发」自由聊天需要先完成 7 阶段流水线，确保系统基础功能已就绪。</p>
+        <p class="locked-hint">完成流水线后会自动解锁「全能 Agent」。</p>
+      </template>
+      <template #extra>
+        <el-button type="primary" @click="goPipeline">前往 AI 流水线</el-button>
+      </template>
+    </el-result>
+  </div>
+
+  <div v-else class="chat-page">
     <!-- 左侧：会话列表 -->
     <aside class="chat-sidebar">
       <div class="sidebar-header">
@@ -166,7 +178,7 @@ import {
   getChatMessages,
   getChatPermissions,
 } from '@/api/opencode'
-import { getProviderConfig } from '@/api/ai'
+import { getProviderConfig, getPipeline } from '@/api/ai'
 import router from '@/router'
 
 // ---------- 状态 ----------
@@ -179,6 +191,9 @@ const sending = ref(false)
 const running = ref(false)
 const msgListRef = ref(null)
 const providerModel = ref('')
+// 流水线完成前锁定自由聊天
+const locked = ref(true)
+const lockChecked = ref(false)
 
 // 权限弹窗
 const permVisible = ref(false)
@@ -206,6 +221,18 @@ marked.setOptions({ gfm: true, breaks: true })
 
 // ---------- 生命周期 ----------
 onMounted(async () => {
+  // 先检查流水线是否已完成（完成前锁定自由聊天）
+  try {
+    const p = await getPipeline()
+    locked.value = !p?.unlocked
+  } catch {
+    // 流水线接口不可用时保持锁定，避免绕过
+    locked.value = true
+  } finally {
+    lockChecked.value = true
+  }
+  if (locked.value) return
+
   await loadProviderModel()
   await loadSessions()
   connectSse()
@@ -218,6 +245,10 @@ onBeforeUnmount(() => {
   sseController?.abort()
   clearInterval(pollTimer)
 })
+
+function goPipeline() {
+  router.push('/ai/pipeline')
+}
 
 async function loadProviderModel() {
   try {
@@ -754,6 +785,18 @@ function scrollToBottom() {
 </script>
 
 <style scoped>
+.locked-page {
+  height: calc(100vh - 60px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #fff;
+}
+.locked-hint {
+  color: #909399;
+  font-size: 13px;
+}
+
 .chat-page {
   height: calc(100vh - 60px);
   display: flex;

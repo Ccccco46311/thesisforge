@@ -16,6 +16,7 @@ import path from 'node:path'
 import fs from 'node:fs/promises'
 import crypto from 'node:crypto'
 import { fileURLToPath } from 'node:url'
+import { buildAgentsConfig } from './agents.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 // bridge/src 的上上级目录即项目根
@@ -84,7 +85,7 @@ async function loadProviderConfig() {
 
 /**
  * 构造 OPENCODE_CONFIG_CONTENT（opencode 原生配置 JSON 字符串）。
- * 用数据库同步来的供应商配置生成 provider 片段。
+ * 用数据库同步来的供应商配置生成 provider 片段，并注入流水线 agent 定义。
  */
 async function buildConfigContent() {
   const p = await loadProviderConfig()
@@ -104,6 +105,8 @@ async function buildConfigContent() {
       },
     },
     model: p.model ? `${providerId}/${p.model}` : undefined,
+    // 流水线 agent：每个阶段一个专属 primary agent（含系统提示词和权限）
+    agents: buildAgentsConfig(),
   })
 }
 
@@ -383,14 +386,16 @@ export const DEFAULT_PERMISSIONS = [
 
 /**
  * 创建 session。
- * @param {object} opts { title, model, agent }
+ * @param {object} opts { title, model, agent, permissions }
  */
 export async function createSession(opts = {}) {
   const body = {
     title: opts.title || 'AI 开发会话',
     location: { directory: PROJECT_ROOT },
-    permissions: opts.permissions || DEFAULT_PERMISSIONS,
   }
+  // 指定 agent 时用 agent 自带权限；否则用默认规则集
+  const permissions = opts.permissions || (opts.agent ? undefined : DEFAULT_PERMISSIONS)
+  if (permissions) body.permissions = permissions
   if (opts.model) {
     const [providerID, modelID] = String(opts.model).split('/')
     body.model = { id: modelID || opts.model, providerID }
@@ -398,6 +403,14 @@ export async function createSession(opts = {}) {
   if (opts.agent) body.agent = opts.agent
   const json = await request('POST', '/api/session', body)
   return json?.data || json
+}
+
+/**
+ * 列出可用 agent（用于校验流水线 agent 是否已注入成功）。
+ */
+export async function listAgents() {
+  const json = await request('GET', '/api/agent')
+  return json?.data || []
 }
 
 /**

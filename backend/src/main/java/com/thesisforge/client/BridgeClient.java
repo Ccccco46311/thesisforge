@@ -89,9 +89,10 @@ public class BridgeClient {
      *
      * @param title 会话标题
      * @param model 模型标识（provider/model）
+     * @param agent agent ID（流水线阶段 agent），null 用默认
      * @return 会话对象；失败返回 null
      */
-    public JsonNode createChatSession(String title, String model) {
+    public JsonNode createChatSession(String title, String model, String agent) {
         try {
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
@@ -99,6 +100,9 @@ public class BridgeClient {
             body.put("title", title);
             if (model != null) {
                 body.put("model", model);
+            }
+            if (agent != null) {
+                body.put("agent", agent);
             }
             HttpEntity<Map<String, String>> entity = new HttpEntity<>(body, headers);
             ResponseEntity<String> resp = restTemplate.exchange(
@@ -108,6 +112,28 @@ public class BridgeClient {
         } catch (Exception e) {
             log.warn("bridge 不可用，创建会话失败: {}", e.getMessage());
             return null;
+        }
+    }
+
+    /**
+     * 创建 OpenCode 会话（不指定 agent）。
+     */
+    public JsonNode createChatSession(String title, String model) {
+        return createChatSession(title, model, null);
+    }
+
+    /**
+     * 列出 OpenCode 可用 agent。
+     */
+    public JsonNode listAgents() {
+        try {
+            ResponseEntity<String> resp = restTemplate.getForEntity(
+                    bridgeUrl + "/api/opencode/agents", String.class);
+            JsonNode json = objectMapper.readTree(resp.getBody());
+            return json.path("data");
+        } catch (Exception e) {
+            log.warn("bridge 不可用，获取 agent 列表失败: {}", e.getMessage());
+            return objectMapper.createArrayNode();
         }
     }
 
