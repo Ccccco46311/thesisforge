@@ -292,8 +292,7 @@ async function switchSession(sessionId) {
 async function loadMessages(sessionId) {
   try {
     const raw = await getChatMessages(sessionId)
-    const list = (raw && Array.isArray(raw)) ? raw : []
-    messages.value = list.map(parseMessage).filter(Boolean)
+    messages.value = parseMessageList(raw)
     scrollToBottom()
   } catch (e) {
     ElMessage.error(`加载消息失败: ${e.message}`)
@@ -301,12 +300,47 @@ async function loadMessages(sessionId) {
 }
 
 /**
+ * 用服务端数据校准当前会话消息（执行结束后调用）。
+ * 保证消息 key 换成服务端真实 ID、顺序正确、内容完整。
+ */
+async function syncMessagesFromServer() {
+  const sid = currentId.value
+  if (!sid) return
+  try {
+    const raw = await getChatMessages(sid)
+    if (sid !== currentId.value) return // 期间切换了会话，丢弃
+    messages.value = parseMessageList(raw)
+    scrollToBottom()
+  } catch {
+    // 校准失败不影响本地展示
+  }
+}
+
+/**
+ * 把服务端消息数组解析为前端模型，并按时间升序排序。
+ * OpenCode 返回顺序是倒序（新 → 旧），必须显式排序，否则 AI 回复会显示在提问上方。
+ */
+function parseMessageList(list) {
+  if (!Array.isArray(list)) return []
+  return list
+    .map(parseMessage)
+    .filter(Boolean)
+    .sort((a, b) => (a.time || 0) - (b.time || 0))
+}
+
+/**
  * 将 OpenCode Message.Info 转为前端消息模型。
+ * 注意：OpenCode 返回的消息是倒序（新 → 旧），调用方需按 time.created 升序排序。
  */
 function parseMessage(m) {
-  const base = { key: m.id || `${Math.random()}`, role: null, text: '', reasoning: '', tools: [], streaming: false }
+  const base = {
+    key: m.id || `${Math.random()}`,
+    time: m.time?.created || 0,
+    role: null, text: '', reasoning: '', tools: [], streaming: false,
+  }
   if (m.type === 'user') {
-    return { ...base, role: 'user', text: m.payload?.text || '' }
+    // user 消息的文本在顶层 text 字段（兼容旧版 payload.text）
+    return { ...base, role: 'user', text: m.text || m.payload?.text || '' }
   }
   if (m.type === 'synthetic') {
     const content = m.payload?.message || m.payload?.text
@@ -363,9 +397,13 @@ async function handleSend() {
   draft.value = ''
   sending.value = true
 
-  messages.value.push({ key: `user-${Date.now()}`, role: 'user', text })
-  messages.value.push({ key: `assistant-${Date.now()}`, role: 'assistant', text: '', reasoning: '', tools: [], streaming: true })
-  streamingKey = `assistant-${Date.now()}`
+  // 用同一个时间戳生成 key，避免多次 Date.now() 不一致导致流式内容写不进占位消息
+  const now = Date.now()
+  const userKey = `user-${now}`
+  const assistantKey = `assistant-${now}`
+  messages.value.push({ key: userKey, time: now, role: 'user', text })
+  messages.value.push({ key: assistantKey, time: now + 1, role: 'assistant', text: '', reasoning: '', tools: [], streaming: true })
+  streamingKey = assistantKey
   running.value = true
   scrollToBottom()
 
@@ -473,8 +511,10 @@ function handleEvent(evt) {
   if (type === 'session.step.started') {
     // 新一步开始，若没有流式消息则建一个
     if (!running.value && !messages.value.find((m) => m.streaming)) {
-      messages.value.push({ key: `assistant-${Date.now()}`, role: 'assistant', text: '', reasoning: '', tools: [], streaming: true })
-      streamingKey = `assistant-${Date.now()}`
+      const now = Date.now()
+      const key = `assistant-${now}`
+      messages.value.push({ key, time: now, role: 'assistant', text: '', reasoning: '', tools: [], streaming: true })
+      streamingKey = key
       running.value = true
     }
     return
@@ -540,6 +580,8 @@ function handleEvent(evt) {
   if (type === 'session.execution.succeeded' || type === 'session.execution.failed') {
     finishStreaming()
     stopPolling()
+    // 执行结束：用服务端最终数据校准（真实消息 ID / 完整内容 / 正确顺序）
+    syncMessagesFromServer()
     return
   }
 
@@ -654,21 +696,27 @@ function startPolling() {
     getChatMessages(currentId.value).then((raw) => {
       if (mySeq !== pollSeq) return
       const list = (raw && Array.isArray(raw)) ? raw : []
-      const parsed = list.map(parseMessage).filter(Boolean)
-      // 保留流式中的 assistant 消息，用服务端最新内容覆盖其余
+      const parsed = parseMessageList(list)
+      const done = list.some((m) => m.type === 'idle' && (m.outcome === 'succeeded' || m.outcome === 'error'))
       const hasStreaming = messages.value.some((m) => m.streaming)
-      if (hasStreaming) {
-        // 增量合并：仅更新已有的非流式消息 + 追加新消息
-        const existing = new Set(parsed.map((p) => p.key))
-        messages.value = [
-          ...parsed,
-          ...messages.value.filter((m) => m.streaming && !existing.has(m.key)),
-        ]
-      } else {
-        messages.value = parsed
-        const done = list.some((m) => m.type === 'idle' && (m.outcome === 'succeeded' || m.outcome === 'error'))
-        if (done) stopPolling()
+
+      if (hasStreaming && !done) {
+        // 流式进行中：不动消息列表，避免本地占位被服务端数据覆盖（会造成消息重复/顺序错乱）
+        return
       }
+
+      if (hasStreaming && done) {
+        // 本轮执行结束：结束流式占位，用服务端最终数据校准
+        finishStreaming()
+        messages.value = parsed
+        stopPolling()
+        scrollToBottom()
+        return
+      }
+
+      // 空闲态兜底同步（如 SSE 断线后补偿）
+      messages.value = parsed
+      if (done) stopPolling()
       scrollToBottom()
     }).catch(() => {})
   }, 3000)
