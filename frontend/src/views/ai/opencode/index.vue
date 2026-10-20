@@ -234,6 +234,8 @@ let lastActivityAt = 0
 const stalled = ref(false)
 const STALL_TIMEOUT = 90 * 1000
 const restarting = ref(false)
+/** 整轮 AI 执行是否进行中（execution 级，区别于 step 级的 running） */
+const executing = ref(false)
 
 function markActivity() {
   lastActivityAt = Date.now()
@@ -263,7 +265,7 @@ function stopStallWatch() {
 const status = computed(() => {
   if (permPendingCount.value > 0) return 'waiting-permission'
   if (stalled.value) return 'stalled'
-  if (!running.value && !sending.value) return 'idle'
+  if (!executing.value && !sending.value) return 'idle'
   const streamingMsg = messages.value.find((m) => m.streaming)
   if (streamingMsg) {
     if (streamingMsg.text) return 'streaming'
@@ -416,6 +418,7 @@ async function switchSession(sessionId) {
   messages.value = []
   streamingKey = ''
   running.value = false
+  executing.value = false
   await loadMessages(sessionId)
   scrollToBottom()
   startPermWatch()
@@ -563,6 +566,7 @@ async function handleSend() {
   messages.value.push({ key: assistantKey, time: now + 1, role: 'assistant', text: '', reasoning: '', tools: [], streaming: true })
   streamingKey = assistantKey
   running.value = true
+  executing.value = true
   markActivity()
   startStallWatch()
   scrollToBottom()
@@ -573,6 +577,7 @@ async function handleSend() {
     startPolling()
   } catch (e) {
     finishStreaming()
+    executing.value = false
     stopStallWatch()
     messages.value.push({ key: `sys-${Date.now()}`, role: 'system', text: `发送失败: ${e.message}` })
     ElMessage.error(`发送失败: ${e.message}`)
@@ -589,10 +594,10 @@ function finishStreaming() {
       messages.value[idx].text = messages.value[idx].reasoning ? '(完成)' : ''
     }
   }
-  running.value = false
   streamingKey = ''
-  stalled.value = false
-  stopStallWatch()
+  // 注意：这里不清 running/executing。session.step.ended 也会调用本函数，
+  // 但一次 execution 可能包含多个 step，step 间隙执行仍在进行中。
+  // running（按钮禁用）与 executing（状态条）都在 execution.succeeded/failed 时统一清零。
 }
 
 // ---------- SSE ----------
@@ -748,6 +753,10 @@ function handleEvent(evt) {
   if (type === 'session.execution.succeeded' || type === 'session.execution.failed') {
     finishStreaming()
     stopPolling()
+    running.value = false
+    executing.value = false
+    stalled.value = false
+    stopStallWatch()
     // 执行结束：用服务端最终数据校准（真实消息 ID / 完整内容 / 正确顺序）
     syncMessagesFromServer()
     return
@@ -760,6 +769,7 @@ function handleEvent(evt) {
 
   if (type === 'session.execution.started') {
     running.value = true
+    executing.value = true
     return
   }
 }
@@ -878,6 +888,10 @@ function startPolling() {
         // 本轮执行结束：结束流式占位，用服务端最终数据校准
         finishStreaming()
         messages.value = mergeWithServer(parsed)
+        running.value = false
+        executing.value = false
+        stalled.value = false
+        stopStallWatch()
         stopPolling()
         markActivity()
         scrollToBottom()
@@ -888,6 +902,10 @@ function startPolling() {
       if (parsed.length !== messages.value.length) markActivity()
       messages.value = mergeWithServer(parsed)
       if (done) {
+        running.value = false
+        executing.value = false
+        stalled.value = false
+        stopStallWatch()
         stopPolling()
         markActivity()
       }

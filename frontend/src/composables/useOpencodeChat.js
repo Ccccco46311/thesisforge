@@ -48,6 +48,16 @@ export function useOpencodeChat({ sessionId, msgListRef }) {
   /** 本轮执行是否已结束（供外部判断「可推进阶段」） */
   const idle = ref(true)
 
+  /**
+   * 整轮 AI 执行是否进行中（execution 级）。
+   *
+   * opencode 一次回复（一个 execution）可能包含多个 step（思考/工具调用/输出），
+   * 每个 step 结束都会发 session.step.ended。若用 running（step 级）判断执行状态，
+   * step 间隙会误判为「空闲」。executing 只在 execution.started 置 true、
+   * execution.succeeded/failed 置 false，保证状态条在整个回复期间保持活动。
+   */
+  const executing = ref(false)
+
   // ---------- 活动状态（思考/工作/卡住检测） ----------
 
   /** 最近一次收到 AI 活动事件的时间戳（ms） */
@@ -98,7 +108,7 @@ export function useOpencodeChat({ sessionId, msgListRef }) {
   const status = computed(() => {
     if (permPendingCount.value > 0) return 'waiting-permission'
     if (stalled.value) return 'stalled'
-    if (!running.value && !sending.value) return 'idle'
+    if (!executing.value && !sending.value) return 'idle'
     const streamingMsg = messages.value.find((m) => m.streaming)
     if (streamingMsg) {
       if (streamingMsg.text) return 'streaming'
@@ -241,6 +251,7 @@ export function useOpencodeChat({ sessionId, msgListRef }) {
     messages.value = []
     streamingKey = ''
     running.value = false
+    executing.value = false
     idle.value = true
     stalled.value = false
     stopPolling()
@@ -262,6 +273,7 @@ export function useOpencodeChat({ sessionId, msgListRef }) {
     draft.value = ''
     sending.value = true
     idle.value = false
+    executing.value = true
 
     const now = Date.now()
     const userKey = `user-${now}`
@@ -283,6 +295,7 @@ export function useOpencodeChat({ sessionId, msgListRef }) {
       startPolling()
     } catch (e) {
       finishStreaming()
+      executing.value = false
       stopStallWatch()
       messages.value.push({ key: `sys-${Date.now()}`, role: 'system', text: `发送失败: ${e.message}` })
       ElMessage.error(`发送失败: ${e.message}`)
@@ -299,10 +312,10 @@ export function useOpencodeChat({ sessionId, msgListRef }) {
         messages.value[idx].text = messages.value[idx].reasoning ? '(完成)' : ''
       }
     }
-    running.value = false
     streamingKey = ''
-    stalled.value = false
-    stopStallWatch()
+    // 注意：这里不再清 running/executing。session.step.ended 也会调用本函数，
+    // 但一次 execution 可能包含多个 step，step 间隙执行仍在进行中。
+    // running（按钮禁用）与 executing（状态条）都在 execution.succeeded/failed 时统一清零。
   }
 
   // ---------- SSE ----------
@@ -442,6 +455,10 @@ export function useOpencodeChat({ sessionId, msgListRef }) {
     if (type === 'session.execution.succeeded' || type === 'session.execution.failed') {
       finishStreaming()
       stopPolling()
+      running.value = false
+      executing.value = false
+      stalled.value = false
+      stopStallWatch()
       idle.value = true
       syncMessagesFromServer()
       return
@@ -454,6 +471,7 @@ export function useOpencodeChat({ sessionId, msgListRef }) {
 
     if (type === 'session.execution.started') {
       running.value = true
+      executing.value = true
       idle.value = false
       return
     }
@@ -569,6 +587,10 @@ export function useOpencodeChat({ sessionId, msgListRef }) {
         if (hasStreaming && done) {
           finishStreaming()
           messages.value = mergeWithServer(parsed)
+          running.value = false
+          executing.value = false
+          stalled.value = false
+          stopStallWatch()
           idle.value = true
           stopPolling()
           markActivity()
@@ -580,6 +602,10 @@ export function useOpencodeChat({ sessionId, msgListRef }) {
         if (parsed.length !== messages.value.length) markActivity()
         messages.value = mergeWithServer(parsed)
         if (done) {
+          running.value = false
+          executing.value = false
+          stalled.value = false
+          stopStallWatch()
           idle.value = true
           stopPolling()
           markActivity()
@@ -674,6 +700,8 @@ export function useOpencodeChat({ sessionId, msgListRef }) {
         headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
       })
       stalled.value = false
+      running.value = false
+      executing.value = false
       // 等 serve 恢复后重新同步当前会话
       await new Promise((r) => setTimeout(r, 3000))
       if (sessionId.value) {
@@ -688,7 +716,7 @@ export function useOpencodeChat({ sessionId, msgListRef }) {
   }
 
   return {
-    messages, draft, sending, running, idle,
+    messages, draft, sending, running, executing, idle,
     permVisible, permRequest, permPendingCount,
     status, stalled, restartServer,
     handleSend, replyPerm, showNextPerm,
