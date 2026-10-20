@@ -135,6 +135,21 @@ app.get('/api/opencode/agents', async (req, res) => {
 })
 
 /**
+ * POST /api/opencode/restart
+ * 重启 opencode serve 进程（用于 opencode 执行引擎偶发卡死时自愈）。
+ * 会话数据持久化在 opencode.db，重启后不丢失。
+ */
+app.post('/api/opencode/restart', async (req, res) => {
+  try {
+    await stopServer()
+    await ensureServer()
+    res.json({ code: 200, msg: 'ok', data: { running: true } })
+  } catch (e) {
+    res.status(500).json({ code: 500, msg: `重启 opencode serve 失败: ${e.message}`, data: null })
+  }
+})
+
+/**
  * GET /api/opencode/status
  * 返回 serve 运行状态。
  */

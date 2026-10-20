@@ -242,4 +242,21 @@ public class BridgeClient {
             return objectMapper.createObjectNode();
         }
     }
+
+    /**
+     * 重启 opencode serve 进程（用于执行引擎偶发卡死时自愈）。
+     *
+     * @return true 重启成功；失败返回 false
+     */
+    public boolean restartServer() {
+        try {
+            ResponseEntity<String> resp = restTemplate.postForEntity(
+                    bridgeUrl + "/api/opencode/restart", null, String.class);
+            JsonNode json = objectMapper.readTree(resp.getBody());
+            return json.path("code").asInt() == 200;
+        } catch (Exception e) {
+            log.warn("bridge 不可用，重启 OpenCode serve 失败: {}", e.getMessage());
+            return false;
+        }
+    }
 }

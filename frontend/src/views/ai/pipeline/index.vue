@@ -124,6 +124,21 @@
             </div>
           </div>
 
+          <!-- AI 状态指示条 -->
+          <div class="ai-status" :class="aiStatusClass">
+            <span class="status-dot" />
+            <span class="status-text">{{ aiStatusText }}</span>
+            <el-button
+              v-if="status === 'stalled'"
+              size="small"
+              type="danger"
+              :loading="restarting"
+              @click="handleRestart"
+            >
+              重启桥接服务
+            </el-button>
+          </div>
+
           <!-- 权限排队提示 -->
           <div v-if="permPendingCount > 0" class="perm-banner">
             <span>🔐 有 {{ permPendingCount }} 个权限请求等待确认</span>
@@ -229,12 +244,40 @@ const sessionId = ref('')
 const {
   messages, draft, sending, running, idle,
   permVisible, permRequest, permPendingCount,
+  status, stalled, restartServer,
   handleSend, replyPerm, showNextPerm,
   resetForSession, dispose, mount,
   renderMd, formatToolInput, formatToolOutput,
 } = useOpencodeChat({ sessionId, msgListRef })
 
+const restarting = ref(false)
+
 // ---------- 计算属性 ----------
+
+// AI 状态展示文案
+const aiStatusText = computed(() => {
+  const map = {
+    idle: '空闲',
+    thinking: 'AI 思考中…',
+    working: 'AI 执行工具中…',
+    streaming: 'AI 生成回复中…',
+    'waiting-permission': '等待权限确认',
+    stalled: 'AI 可能卡住了：超过 90 秒无进展',
+  }
+  return map[status.value] || '空闲'
+})
+
+const aiStatusClass = computed(() => `status-${status.value}`)
+
+async function handleRestart() {
+  restarting.value = true
+  try {
+    await restartServer()
+    ElMessage.success('桥接服务已重启，会话已恢复')
+  } finally {
+    restarting.value = false
+  }
+}
 
 const currentStage = computed(() => {
   if (!pipeline.value) return null
@@ -760,6 +803,42 @@ onBeforeUnmount(dispose)
 }
 
 /* 权限提示 */
+/* AI 状态指示条 */
+.ai-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 20px;
+  font-size: 12px;
+  color: #909399;
+  background: #fafbfc;
+  border-top: 1px solid #f0f2f5;
+  flex-shrink: 0;
+}
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #c0c4cc;
+  flex-shrink: 0;
+}
+.status-idle .status-dot { background: #c0c4cc; }
+.status-thinking .status-dot { background: #409eff; animation: blink 1.2s infinite; }
+.status-working .status-dot { background: #e6a23c; animation: blink 1.2s infinite; }
+.status-streaming .status-dot { background: #67c23a; animation: blink 1.2s infinite; }
+.status-waiting-permission .status-dot { background: #e6a23c; }
+.status-stalled {
+  color: #f56c6c;
+  background: #fef0f0;
+  border-top: 1px solid #fbc4c4;
+}
+.status-stalled .status-dot { background: #f56c6c; animation: blink 0.8s infinite; }
+.status-stalled .status-text { font-weight: 600; }
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
 .perm-banner {
   display: flex;
   align-items: center;

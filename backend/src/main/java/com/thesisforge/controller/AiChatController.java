@@ -60,6 +60,17 @@ public class AiChatController {
         return Result.ok(aiChatService.getStatus());
     }
 
+    /**
+     * 重启 opencode serve（执行引擎偶发卡死时自愈）。
+     */
+    @PostMapping("/restart")
+    public Result<Void> restart() {
+        if (!aiChatService.restartServer()) {
+            return Result.fail("重启 OpenCode 服务失败：bridge 不可用");
+        }
+        return Result.ok();
+    }
+
     // ---------- 消息 ----------
 
     @PostMapping("/sessions/{sessionId}/prompt")

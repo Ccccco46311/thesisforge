@@ -41,11 +41,72 @@ export function useOpencodeChat({ sessionId, msgListRef }) {
   let sseTimer = null
   let pollTimer = null
   let permWatchTimer = null
+  let stallTimer = null
   let pollSeq = 0
   let streamingKey = ''
 
   /** 本轮执行是否已结束（供外部判断「可推进阶段」） */
   const idle = ref(true)
+
+  // ---------- 活动状态（思考/工作/卡住检测） ----------
+
+  /** 最近一次收到 AI 活动事件的时间戳（ms） */
+  let lastActivityAt = 0
+  /** 是否疑似卡住（运行中且超过阈值无任何活动） */
+  const stalled = ref(false)
+  /** 卡住判定阈值（ms） */
+  const STALL_TIMEOUT = 90 * 1000
+
+  /**
+   * 记录一次 AI 活动（SSE 事件 / 轮询进展 / 权限请求都算）。
+   * 重置卡住状态并刷新最后活动时间。
+   */
+  function markActivity() {
+    lastActivityAt = Date.now()
+    if (stalled.value) stalled.value = false
+  }
+
+  /**
+   * 心跳检测：运行中但超过阈值无活动 → 判定疑似卡住。
+   */
+  function startStallWatch() {
+    stopStallWatch()
+    stallTimer = setInterval(() => {
+      if (!running.value && !sending.value) {
+        stalled.value = false
+        return
+      }
+      const silent = Date.now() - lastActivityAt
+      if (silent >= STALL_TIMEOUT) {
+        stalled.value = true
+      }
+    }, 5000)
+  }
+
+  function stopStallWatch() {
+    if (stallTimer) {
+      clearInterval(stallTimer)
+      stallTimer = null
+    }
+  }
+
+  /**
+   * 当前 AI 运行状态（供界面显示）：
+   * idle 空闲 / thinking 思考中 / working 执行工具中 / streaming 生成回复中 /
+   * waiting-permission 等待权限确认 / stalled 疑似卡住
+   */
+  const status = computed(() => {
+    if (permPendingCount.value > 0) return 'waiting-permission'
+    if (stalled.value) return 'stalled'
+    if (!running.value && !sending.value) return 'idle'
+    const streamingMsg = messages.value.find((m) => m.streaming)
+    if (streamingMsg) {
+      if (streamingMsg.text) return 'streaming'
+      if (streamingMsg.tools.length) return 'working'
+      return 'thinking'
+    }
+    return 'thinking'
+  })
 
   marked.setOptions({ gfm: true, breaks: true })
 
@@ -181,7 +242,9 @@ export function useOpencodeChat({ sessionId, msgListRef }) {
     streamingKey = ''
     running.value = false
     idle.value = true
+    stalled.value = false
     stopPolling()
+    stopStallWatch()
     loadMessages()
   }
 
@@ -210,6 +273,8 @@ export function useOpencodeChat({ sessionId, msgListRef }) {
     })
     streamingKey = assistantKey
     running.value = true
+    markActivity()
+    startStallWatch()
     scrollToBottom()
 
     try {
@@ -218,6 +283,7 @@ export function useOpencodeChat({ sessionId, msgListRef }) {
       startPolling()
     } catch (e) {
       finishStreaming()
+      stopStallWatch()
       messages.value.push({ key: `sys-${Date.now()}`, role: 'system', text: `发送失败: ${e.message}` })
       ElMessage.error(`发送失败: ${e.message}`)
     } finally {
@@ -235,6 +301,8 @@ export function useOpencodeChat({ sessionId, msgListRef }) {
     }
     running.value = false
     streamingKey = ''
+    stalled.value = false
+    stopStallWatch()
   }
 
   // ---------- SSE ----------
@@ -307,6 +375,11 @@ export function useOpencodeChat({ sessionId, msgListRef }) {
 
     if (type.startsWith('session.') && data.sessionID && data.sessionID !== sessionId.value) {
       return
+    }
+
+    // 任何 AI 相关活动都刷新「最后活动时间」（卡住检测依据）
+    if (type.startsWith('session.') || type === 'permission.asked') {
+      markActivity()
     }
 
     if (type === 'session.step.started') {
@@ -498,14 +571,18 @@ export function useOpencodeChat({ sessionId, msgListRef }) {
           messages.value = mergeWithServer(parsed)
           idle.value = true
           stopPolling()
+          markActivity()
           scrollToBottom()
           return
         }
 
+        // 空闲态兜底同步；消息数有变化说明有进展，刷新活动时间
+        if (parsed.length !== messages.value.length) markActivity()
         messages.value = mergeWithServer(parsed)
         if (done) {
           idle.value = true
           stopPolling()
+          markActivity()
         }
         scrollToBottom()
       }).catch(() => {})
@@ -549,6 +626,7 @@ export function useOpencodeChat({ sessionId, msgListRef }) {
     sseController?.abort()
     stopPolling()
     stopPermWatch()
+    stopStallWatch()
   }
 
   // ---------- 常驻权限 watchdog ----------
@@ -585,9 +663,34 @@ export function useOpencodeChat({ sessionId, msgListRef }) {
     startPermWatch()
   }
 
+  /**
+   * 重启 opencode serve（执行引擎偶发卡死时自愈）。
+   * 重启后重新加载当前会话消息。返回是否成功。
+   */
+  async function restartServer() {
+    try {
+      await fetch(`${import.meta.env.VITE_API_BASE || ''}/api/ai/chat/restart`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+      })
+      stalled.value = false
+      // 等 serve 恢复后重新同步当前会话
+      await new Promise((r) => setTimeout(r, 3000))
+      if (sessionId.value) {
+        await loadMessages()
+        startPermWatch()
+      }
+      return true
+    } catch (e) {
+      ElMessage.error(`重启 OpenCode 服务失败: ${e.message}`)
+      return false
+    }
+  }
+
   return {
     messages, draft, sending, running, idle,
     permVisible, permRequest, permPendingCount,
+    status, stalled, restartServer,
     handleSend, replyPerm, showNextPerm,
     loadMessages, resetForSession, dispose, mount,
     renderMd, formatToolInput, formatToolOutput, scrollToBottom,

@@ -107,6 +107,21 @@
           </div>
         </div>
 
+        <!-- AI 状态指示条 -->
+        <div class="ai-status" :class="statusClass">
+          <span class="status-dot" />
+          <span class="status-text">{{ statusText }}</span>
+          <el-button
+            v-if="status === 'stalled'"
+            size="small"
+            type="danger"
+            :loading="restarting"
+            @click="handleRestart"
+          >
+            重启桥接服务
+          </el-button>
+        </div>
+
         <!-- 权限排队提示 -->
         <div v-if="permPendingCount > 0" class="perm-banner">
           <span>🔐 有 {{ permPendingCount }} 个权限请求等待确认</span>
@@ -212,6 +227,87 @@ let sseController = null
 let sseAborted = false
 let sseTimer = null
 let pollTimer = null
+let stallTimer = null
+
+// ---------- 活动状态（思考/工作/卡住检测） ----------
+let lastActivityAt = 0
+const stalled = ref(false)
+const STALL_TIMEOUT = 90 * 1000
+const restarting = ref(false)
+
+function markActivity() {
+  lastActivityAt = Date.now()
+  if (stalled.value) stalled.value = false
+}
+
+function startStallWatch() {
+  stopStallWatch()
+  stallTimer = setInterval(() => {
+    if (!running.value && !sending.value) {
+      stalled.value = false
+      return
+    }
+    if (Date.now() - lastActivityAt >= STALL_TIMEOUT) {
+      stalled.value = true
+    }
+  }, 5000)
+}
+
+function stopStallWatch() {
+  if (stallTimer) {
+    clearInterval(stallTimer)
+    stallTimer = null
+  }
+}
+
+const status = computed(() => {
+  if (permPendingCount.value > 0) return 'waiting-permission'
+  if (stalled.value) return 'stalled'
+  if (!running.value && !sending.value) return 'idle'
+  const streamingMsg = messages.value.find((m) => m.streaming)
+  if (streamingMsg) {
+    if (streamingMsg.text) return 'streaming'
+    if (streamingMsg.tools.length) return 'working'
+    return 'thinking'
+  }
+  return 'thinking'
+})
+
+const statusText = computed(() => {
+  const map = {
+    idle: '空闲',
+    thinking: 'AI 思考中…',
+    working: 'AI 执行工具中…',
+    streaming: 'AI 生成回复中…',
+    'waiting-permission': '等待权限确认',
+    stalled: 'AI 可能卡住了：超过 90 秒无进展',
+  }
+  return map[status.value] || '空闲'
+})
+
+const statusClass = computed(() => `status-${status.value}`)
+
+async function handleRestart() {
+  restarting.value = true
+  try {
+    const resp = await fetch(`${import.meta.env.VITE_API_BASE || ''}/api/ai/chat/restart`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+    })
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+    stalled.value = false
+    await new Promise((r) => setTimeout(r, 3000))
+    if (currentId.value) {
+      await loadMessages(currentId.value)
+      startPermWatch()
+    }
+    ElMessage.success('桥接服务已重启，会话已恢复')
+  } catch (e) {
+    ElMessage.error(`重启 OpenCode 服务失败: ${e.message}`)
+  } finally {
+    restarting.value = false
+  }
+}
 let pollSeq = 0
 let permWatchTimer = null
 
@@ -247,6 +343,7 @@ onBeforeUnmount(() => {
   sseController?.abort()
   clearInterval(pollTimer)
   stopPermWatch()
+  stopStallWatch()
 })
 
 function goPipeline() {
@@ -466,6 +563,8 @@ async function handleSend() {
   messages.value.push({ key: assistantKey, time: now + 1, role: 'assistant', text: '', reasoning: '', tools: [], streaming: true })
   streamingKey = assistantKey
   running.value = true
+  markActivity()
+  startStallWatch()
   scrollToBottom()
 
   try {
@@ -474,6 +573,7 @@ async function handleSend() {
     startPolling()
   } catch (e) {
     finishStreaming()
+    stopStallWatch()
     messages.value.push({ key: `sys-${Date.now()}`, role: 'system', text: `发送失败: ${e.message}` })
     ElMessage.error(`发送失败: ${e.message}`)
   } finally {
@@ -491,6 +591,8 @@ function finishStreaming() {
   }
   running.value = false
   streamingKey = ''
+  stalled.value = false
+  stopStallWatch()
 }
 
 // ---------- SSE ----------
@@ -567,6 +669,11 @@ function handleEvent(evt) {
   // 只处理当前会话事件
   if (type.startsWith('session.') && data.sessionID && data.sessionID !== currentId.value) {
     return
+  }
+
+  // 任何 AI 相关活动都刷新「最后活动时间」（卡住检测依据）
+  if (type.startsWith('session.') || type === 'permission.asked') {
+    markActivity()
   }
 
   if (type === 'session.step.started') {
@@ -772,13 +879,18 @@ function startPolling() {
         finishStreaming()
         messages.value = mergeWithServer(parsed)
         stopPolling()
+        markActivity()
         scrollToBottom()
         return
       }
 
-      // 空闲态兜底同步（如 SSE 断线后补偿）
+      // 空闲态兜底同步；消息数有变化说明有进展，刷新活动时间
+      if (parsed.length !== messages.value.length) markActivity()
       messages.value = mergeWithServer(parsed)
-      if (done) stopPolling()
+      if (done) {
+        stopPolling()
+        markActivity()
+      }
       scrollToBottom()
     }).catch(() => {})
   }, 3000)
@@ -931,6 +1043,42 @@ function scrollToBottom() {
   overflow-y: auto;
   padding: 20px 24px;
 }
+/* AI 状态指示条 */
+.ai-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 16px;
+  font-size: 12px;
+  color: #909399;
+  background: #fafbfc;
+  border-bottom: 1px solid #f0f2f5;
+  flex-shrink: 0;
+}
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #c0c4cc;
+  flex-shrink: 0;
+}
+.status-idle .status-dot { background: #c0c4cc; }
+.status-thinking .status-dot { background: #409eff; animation: blink 1.2s infinite; }
+.status-working .status-dot { background: #e6a23c; animation: blink 1.2s infinite; }
+.status-streaming .status-dot { background: #67c23a; animation: blink 1.2s infinite; }
+.status-waiting-permission .status-dot { background: #e6a23c; }
+.status-stalled {
+  color: #f56c6c;
+  background: #fef0f0;
+  border-bottom: 1px solid #fbc4c4;
+}
+.status-stalled .status-dot { background: #f56c6c; animation: blink 0.8s infinite; }
+.status-stalled .status-text { font-weight: 600; }
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
 .perm-banner {
   display: flex;
   align-items: center;

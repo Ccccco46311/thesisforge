@@ -219,4 +219,13 @@ public class AiChatService {
     public JsonNode getStatus() {
         return bridgeClient.getChatStatus();
     }
+
+    /**
+     * 重启 opencode serve（执行引擎偶发卡死时自愈）。
+     *
+     * @return 是否重启成功
+     */
+    public boolean restartServer() {
+        return bridgeClient.restartServer();
+    }
 }
