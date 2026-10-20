@@ -1,4 +1,4 @@
-import { ref, computed, onBeforeUnmount, nextTick } from 'vue'
+import { ref, computed, watch, onBeforeUnmount, nextTick } from 'vue'
 import { ElMessage } from 'element-plus'
 import { marked } from 'marked'
 import {
@@ -40,6 +40,7 @@ export function useOpencodeChat({ sessionId, msgListRef }) {
   let sseAborted = false
   let sseTimer = null
   let pollTimer = null
+  let permWatchTimer = null
   let pollSeq = 0
   let streamingKey = ''
 
@@ -372,9 +373,11 @@ export function useOpencodeChat({ sessionId, msgListRef }) {
 
   function handlePermission(data) {
     const id = data.id || ''
-    if (!id || shownPermIds.has(id)) return
-    shownPermIds.add(id)
+    if (!id) return
+    // 非当前会话的权限事件直接忽略（SSE 是全局事件流）
     if (data.sessionID && data.sessionID !== sessionId.value) return
+    if (shownPermIds.has(id)) return
+    shownPermIds.add(id)
     const item = { id, action: data.action || 'shell', resources: data.resources || [] }
     if (data.sessionID) item.sessionId = data.sessionID
     permQueue.value.push(item)
@@ -518,10 +521,41 @@ export function useOpencodeChat({ sessionId, msgListRef }) {
     clearTimeout(permTimer)
     sseController?.abort()
     stopPolling()
+    stopPermWatch()
   }
+
+  // ---------- 常驻权限 watchdog ----------
+
+  /**
+   * 只要当前会话非空，就定期轮询挂起的权限请求。
+   * 流水线阶段由后端注入引导消息、用户未手动发消息，若依赖 handleSend 后的轮询，
+   * SSE 事件一旦丢失权限弹窗就永远不出现（AI 会一直等待确认）。此 watchdog 兜底解决。
+   */
+  function startPermWatch() {
+    stopPermWatch()
+    if (!sessionId.value) return
+    permWatchTimer = setInterval(() => {
+      checkPendingPerms()
+    }, 3000)
+    // 启动即查一次，避免 SSE 事件在订阅前已发生
+    checkPendingPerms()
+  }
+
+  function stopPermWatch() {
+    if (permWatchTimer) {
+      clearInterval(permWatchTimer)
+      permWatchTimer = null
+    }
+  }
+
+  // 会话切换时重启 watchdog
+  watch(sessionId, () => {
+    startPermWatch()
+  })
 
   function mount() {
     connectSse()
+    startPermWatch()
   }
 
   return {

@@ -213,6 +213,7 @@ let sseAborted = false
 let sseTimer = null
 let pollTimer = null
 let pollSeq = 0
+let permWatchTimer = null
 
 // 正在流式输出的 assistant 消息 key
 let streamingKey = ''
@@ -236,6 +237,7 @@ onMounted(async () => {
   await loadProviderModel()
   await loadSessions()
   connectSse()
+  startPermWatch()
 })
 
 onBeforeUnmount(() => {
@@ -244,6 +246,7 @@ onBeforeUnmount(() => {
   clearTimeout(permTimer)
   sseController?.abort()
   clearInterval(pollTimer)
+  stopPermWatch()
 })
 
 function goPipeline() {
@@ -318,6 +321,7 @@ async function switchSession(sessionId) {
   running.value = false
   await loadMessages(sessionId)
   scrollToBottom()
+  startPermWatch()
 }
 
 async function loadMessages(sessionId) {
@@ -644,10 +648,11 @@ function findStreamingKey() {
  */
 function handlePermission(data) {
   const id = data.id || ''
-  if (!id || shownPermIds.has(id)) return
-  shownPermIds.add(id)
+  if (!id) return
   // 非当前会话的权限事件直接忽略（SSE 是全局事件流）
   if (data.sessionID && data.sessionID !== currentId.value) return
+  if (shownPermIds.has(id)) return
+  shownPermIds.add(id)
   const item = { id, action: data.action || 'shell', resources: data.resources || [] }
   if (data.sessionID) item.sessionId = data.sessionID
   permQueue.value.push(item)
@@ -756,6 +761,28 @@ function startPolling() {
 function stopPolling() {
   clearInterval(pollTimer)
   pollTimer = null
+}
+
+/**
+ * 常驻权限 watchdog：只要当前会话非空，就定期轮询挂起的权限请求。
+ * 自由聊天页用户可能长时间不发消息，SSE 事件一旦丢失权限弹窗就永远不出现
+ * （AI 会一直等待确认）。此 watchdog 兜底解决。
+ */
+function startPermWatch() {
+  stopPermWatch()
+  if (!currentId.value) return
+  permWatchTimer = setInterval(() => {
+    checkPendingPerms()
+  }, 3000)
+  // 启动即查一次，避免 SSE 事件在订阅前已发生
+  checkPendingPerms()
+}
+
+function stopPermWatch() {
+  if (permWatchTimer) {
+    clearInterval(permWatchTimer)
+    permWatchTimer = null
+  }
 }
 
 // ---------- 工具 ----------
