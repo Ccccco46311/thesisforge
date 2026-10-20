@@ -681,14 +681,18 @@ function handleEvent(evt) {
     markActivity()
   }
 
-  if (type === 'session.step.started') {
-    // 新一步开始，若没有流式消息则建一个
-    if (!running.value && !messages.value.find((m) => m.streaming)) {
+  if (type === 'session.step.started' || type === 'session.text.started' || type === 'session.reasoning.started') {
+    // 确保当前存在一个流式占位消息，让后续 delta 有处可写。
+    // 后端注入触发执行时无本地占位，若不在此创建则 streamingKey 为空，
+    // 所有 reasoning/text delta 都会被 findStreamingKey() 丢弃。
+    const hasStreaming = messages.value.find((m) => m.streaming)
+    if (!hasStreaming) {
       const now = Date.now()
       const key = `assistant-${now}`
       messages.value.push({ key, time: now, role: 'assistant', text: '', reasoning: '', tools: [], streaming: true })
       streamingKey = key
       running.value = true
+      executing.value = true
     }
     return
   }

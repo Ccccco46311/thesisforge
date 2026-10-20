@@ -395,8 +395,13 @@ export function useOpencodeChat({ sessionId, msgListRef }) {
       markActivity()
     }
 
-    if (type === 'session.step.started') {
-      if (!running.value && !messages.value.find((m) => m.streaming)) {
+    if (type === 'session.step.started' || type === 'session.text.started' || type === 'session.reasoning.started') {
+      // 确保当前存在一个流式占位消息，让后续 delta 有处可写。
+      // 流水线阶段由后端注入引导消息触发执行时，handleSend 未被调用、
+      // 没有本地占位；若不在此创建，streamingKey 为空，所有 reasoning/text
+      // delta 都会被 findStreamingKey() 丢弃（表现为「等一会一次性出现结果」）。
+      const hasStreaming = messages.value.find((m) => m.streaming)
+      if (!hasStreaming) {
         const now = Date.now()
         const key = `assistant-${now}`
         messages.value.push({
@@ -405,6 +410,7 @@ export function useOpencodeChat({ sessionId, msgListRef }) {
         })
         streamingKey = key
         running.value = true
+        executing.value = true
       }
       return
     }
