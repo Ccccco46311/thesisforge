@@ -17,19 +17,19 @@ import java.util.List;
 public enum PipelineStage {
 
     ENVIRONMENT("environment", "环境搭建", 1,
-            "docs/environment-report.md",
+            "docs/ai/environment-report.md",
             "environment"),
 
     REQUIREMENT("requirement", "需求核对", 2,
-            "docs/requirements.md",
+            "docs/ai/requirements.md",
             "requirement"),
 
     PLANNING("planning", "进度计划", 3,
-            "docs/plan.md",
+            "docs/ai/plan.md",
             "planning"),
 
     DESIGN("design", "系统设计", 4,
-            "docs/system-design.md",
+            "docs/ai/system-design.md",
             "design"),
 
     DEVELOPMENT("development", "开发", 5,
@@ -37,11 +37,11 @@ public enum PipelineStage {
             "development"),
 
     TESTING("testing", "测试", 6,
-            "docs/test-report.md",
+            "docs/ai/test-report.md",
             "testing"),
 
     ACCEPTANCE("acceptance", "验收交付", 7,
-            "docs/acceptance.md",
+            "docs/ai/acceptance.md",
             "acceptance");
 
     /** 阶段编码 */

@@ -27,13 +27,13 @@
 
 | 阶段 | 产出文档 | 说明 |
 |---|---|---|
-| ① 环境搭建 | `docs/environment-report.md` | 检查 JDK / Maven / Node / MySQL / 浏览器 / 端口 |
-| ② 需求核对 | `docs/requirements.md` | 对话式梳理需求，核对本科毕设体量 |
-| ③ 进度计划 | `docs/plan.md` | 自动导入「进度计划」页 |
-| ④ 系统设计 | `docs/system-design.md` | 技术栈、表设计、**ER 图**、**数据流图** |
+| ① 环境搭建 | `docs/ai/environment-report.md` | 检查 JDK / Maven / Node / MySQL / 浏览器 / 端口 |
+| ② 需求核对 | `docs/ai/requirements.md` | 对话式梳理需求，核对本科毕设体量 |
+| ③ 进度计划 | `docs/ai/plan.md` | 自动导入「进度计划」页 |
+| ④ 系统设计 | `docs/ai/system-design.md` | 技术栈、表设计、**ER 图**、**数据流图** |
 | ⑤ 开发 | — | 逐模块实现，数据库变更写 Flyway |
-| ⑥ 测试 | `docs/test-report.md` | 逐项测试并修复 |
-| ⑦ 验收交付 | `docs/acceptance.md` | 验收清单 + 从零运行说明 |
+| ⑥ 测试 | `docs/ai/test-report.md` | 逐项测试并修复 |
+| ⑦ 验收交付 | `docs/ai/acceptance.md` | 验收清单 + 从零运行说明 |
 
 **支持**：阶段回退重跑（点已完成的阶段）、整条流水线重置；产出文档与历史会话永久保留可回溯。
 

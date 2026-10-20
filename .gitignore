@@ -30,6 +30,9 @@ Thumbs.db
 # ---- Runtime data ----
 data/
 
+# ---- AI 生成的毕设文档（流水线产出，不进入仓库） ----
+docs/ai/
+
 # ---- Bridge runtime config (contains API keys) ----
 bridge/src/opencode.json
 bridge/opencode.json

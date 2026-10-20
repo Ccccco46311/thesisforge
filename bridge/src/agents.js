@@ -12,15 +12,16 @@
 
 /**
  * 阶段产出文档路径（与后端 PipelineStage 保持一致）。
+ * 统一放在 docs/ai/ 子目录（已加入 .gitignore，AI 生成的毕设文档不进入仓库）。
  */
 export const STAGE_OUTPUT = {
-  environment: 'docs/environment-report.md',
-  requirement: 'docs/requirements.md',
-  planning: 'docs/plan.md',
-  design: 'docs/system-design.md',
+  environment: 'docs/ai/environment-report.md',
+  requirement: 'docs/ai/requirements.md',
+  planning: 'docs/ai/plan.md',
+  design: 'docs/ai/system-design.md',
   development: null,
-  testing: 'docs/test-report.md',
-  acceptance: 'docs/acceptance.md',
+  testing: 'docs/ai/test-report.md',
+  acceptance: 'docs/ai/acceptance.md',
 }
 
 const COMMON_RULES = `
