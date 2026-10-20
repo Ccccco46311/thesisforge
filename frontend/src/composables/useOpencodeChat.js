@@ -123,6 +123,33 @@ export function useOpencodeChat({ sessionId, msgListRef }) {
 
   // ---------- 会话 ----------
 
+  /**
+   * 合并服务端消息与本地未确认消息。
+   *
+   * opencode 对消息有延迟（异步写入/索引），服务端拉取可能暂时不含刚发送的消息；
+   * 若直接覆盖，用户刚发的问题会「消失」。此函数保留本地以 user-/assistant- 开头、
+   * 服务端尚未出现的临时消息（按文本去重），并按时间升序排回。
+   */
+  function mergeWithServer(parsed) {
+    const serverTexts = new Set(
+      parsed.filter((m) => m.role === 'user').map((m) => m.text)
+    )
+    const merged = [...parsed]
+    for (const m of messages.value) {
+      const isLocal = m.key && (m.key.startsWith('user-') || m.key.startsWith('assistant-'))
+      if (!isLocal) continue
+      if (m.role === 'user') {
+        if (serverTexts.has(m.text)) continue // 服务端已有，丢弃本地临时
+        merged.push(m)
+      } else if (m.role === 'assistant' && m.streaming) {
+        // 本地正在流式占位：若服务端已有同会话流式消息则跳过，否则保留
+        const already = parsed.some((p) => p.role === 'assistant' && p.streaming)
+        if (!already) merged.push(m)
+      }
+    }
+    return merged.sort((a, b) => (a.time || 0) - (b.time || 0))
+  }
+
   async function loadMessages() {
     if (!sessionId.value) return
     try {
@@ -141,7 +168,7 @@ export function useOpencodeChat({ sessionId, msgListRef }) {
     try {
       const raw = await getChatMessages(sid)
       if (sid !== sessionId.value) return
-      messages.value = parseMessageList(raw)
+      messages.value = mergeWithServer(parseMessageList(raw))
       updateIdle(raw)
       scrollToBottom()
     } catch {
@@ -468,14 +495,14 @@ export function useOpencodeChat({ sessionId, msgListRef }) {
 
         if (hasStreaming && done) {
           finishStreaming()
-          messages.value = parsed
+          messages.value = mergeWithServer(parsed)
           idle.value = true
           stopPolling()
           scrollToBottom()
           return
         }
 
-        messages.value = parsed
+        messages.value = mergeWithServer(parsed)
         if (done) {
           idle.value = true
           stopPolling()

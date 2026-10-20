@@ -335,6 +335,32 @@ async function loadMessages(sessionId) {
 }
 
 /**
+ * 合并服务端消息与本地未确认消息。
+ *
+ * opencode 对消息有延迟（异步写入/索引），服务端拉取可能暂时不含刚发送的消息；
+ * 若直接覆盖，用户刚发的问题会「消失」。此函数保留本地以 user-/assistant- 开头、
+ * 服务端尚未出现的临时消息（按文本去重），并按时间升序排回。
+ */
+function mergeWithServer(parsed) {
+  const serverTexts = new Set(
+    parsed.filter((m) => m.role === 'user').map((m) => m.text)
+  )
+  const merged = [...parsed]
+  for (const m of messages.value) {
+    const isLocal = m.key && (m.key.startsWith('user-') || m.key.startsWith('assistant-'))
+    if (!isLocal) continue
+    if (m.role === 'user') {
+      if (serverTexts.has(m.text)) continue // 服务端已有，丢弃本地临时
+      merged.push(m)
+    } else if (m.role === 'assistant' && m.streaming) {
+      const already = parsed.some((p) => p.role === 'assistant' && p.streaming)
+      if (!already) merged.push(m)
+    }
+  }
+  return merged.sort((a, b) => (a.time || 0) - (b.time || 0))
+}
+
+/**
  * 用服务端数据校准当前会话消息（执行结束后调用）。
  * 保证消息 key 换成服务端真实 ID、顺序正确、内容完整。
  */
@@ -344,7 +370,7 @@ async function syncMessagesFromServer() {
   try {
     const raw = await getChatMessages(sid)
     if (sid !== currentId.value) return // 期间切换了会话，丢弃
-    messages.value = parseMessageList(raw)
+    messages.value = mergeWithServer(parseMessageList(raw))
     scrollToBottom()
   } catch {
     // 校准失败不影响本地展示
@@ -744,14 +770,14 @@ function startPolling() {
       if (hasStreaming && done) {
         // 本轮执行结束：结束流式占位，用服务端最终数据校准
         finishStreaming()
-        messages.value = parsed
+        messages.value = mergeWithServer(parsed)
         stopPolling()
         scrollToBottom()
         return
       }
 
       // 空闲态兜底同步（如 SSE 断线后补偿）
-      messages.value = parsed
+      messages.value = mergeWithServer(parsed)
       if (done) stopPolling()
       scrollToBottom()
     }).catch(() => {})
