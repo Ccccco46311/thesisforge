@@ -393,8 +393,17 @@ export async function createSession(opts = {}) {
     title: opts.title || 'AI 开发会话',
     location: { directory: PROJECT_ROOT },
   }
-  // 指定 agent 时用 agent 自带权限；否则用默认规则集
-  const permissions = opts.permissions || (opts.agent ? undefined : DEFAULT_PERMISSIONS)
+  // 指定 agent 时，显式带上该 agent 的 permissions。
+  // 实测 opencode 创建 agent 会话时并不会自动应用 agent 配置里的 permissions
+  // （会退回 build 默认规则集），导致白名单规则（如 mysql --version* allow）
+  // 不生效、以及意外的全量 edit 权限。显式传入才能保证规则真实生效。
+  let permissions = opts.permissions
+  if (!permissions && opts.agent) {
+    permissions = getAgentPermissions(opts.agent)
+  }
+  if (!permissions) {
+    permissions = DEFAULT_PERMISSIONS
+  }
   if (permissions) body.permissions = permissions
   if (opts.model) {
     const [providerID, modelID] = String(opts.model).split('/')
@@ -403,6 +412,15 @@ export async function createSession(opts = {}) {
   if (opts.agent) body.agent = opts.agent
   const json = await request('POST', '/api/session', body)
   return json?.data || json
+}
+
+/**
+ * 取指定 agent 的 permissions（PIPELINE_AGENTS / almighty 中定义）。
+ */
+function getAgentPermissions(agentId) {
+  const agents = buildAgentsConfig()
+  const def = agents[agentId]
+  return def?.permissions || null
 }
 
 /**

@@ -19,7 +19,6 @@ import {
   replyPermission,
   listPermissions,
   PROJECT_ROOT,
-  DEFAULT_PERMISSIONS,
 } from './opencode.js'
 
 const execFileAsync = promisify(execFile)
@@ -173,7 +172,9 @@ app.post('/api/opencode/sessions', async (req, res) => {
       title: body.title,
       model: body.model,
       agent: body.agent,
-      permissions: body.permissions || DEFAULT_PERMISSIONS,
+      // 不在这里兜底 DEFAULT_PERMISSIONS：传 undefined 时由 createSession
+      // 决定（有 agent 用该 agent 的权限；否则用默认规则集），否则 agent 权限永远不生效
+      permissions: body.permissions,
     })
     res.json({ code: 200, msg: 'ok', data: session })
   } catch (e) {
