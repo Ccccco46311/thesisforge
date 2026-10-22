@@ -5,6 +5,8 @@ import {
   sendChatPrompt,
   getChatMessages,
   getChatPermissions,
+  getChatSessionInfo,
+  compactChatSession,
 } from '@/api/opencode'
 import router from '@/router'
 
@@ -57,6 +59,75 @@ export function useOpencodeChat({ sessionId, msgListRef }) {
    * execution.succeeded/failed 置 false，保证状态条在整个回复期间保持活动。
    */
   const executing = ref(false)
+
+  // ---------- 上下文占用（展示 + 压缩） ----------
+
+  /** 上下文 limit（从 serve 配置，deepseek-v4-flash/pro 均为 100 万） */
+  const CONTEXT_LIMIT = 1048576
+  /** 当前会话 tokens 使用量 */
+  const contextInputTokens = ref(0)
+  /** 是否正在请求压缩 */
+  const compacting = ref(false)
+  /** 上下文占用百分比（0-100+，超过 100 说明超限） */
+  const contextPercent = computed(() => {
+    if (contextInputTokens.value <= 0) return 0
+    return Math.round((contextInputTokens.value / CONTEXT_LIMIT) * 100)
+  })
+  /** 占用颜色分级 */
+  const contextLevel = computed(() => {
+    const p = contextPercent.value
+    if (p >= 90) return 'danger'
+    if (p >= 70) return 'warning'
+    return 'success'
+  })
+
+  let contextTimer = null
+
+  /** 拉取当前会话上下文占用 */
+  async function refreshContext() {
+    if (!sessionId.value) return
+    try {
+      const info = await getChatSessionInfo(sessionId.value)
+      const tokens = info?.tokens
+      if (tokens) {
+        contextInputTokens.value = tokens.input || 0
+      }
+    } catch {
+      // 静默失败，下次轮询再试
+    }
+  }
+
+  /** 请求压缩会话上下文 */
+  async function compactContext() {
+    if (!sessionId.value || compacting.value) return
+    compacting.value = true
+    try {
+      await compactChatSession(sessionId.value)
+      ElMessage.success('压缩请求已提交，将在下一个步骤生效')
+      // 延迟刷新占用（压缩是异步的，稍后生效）
+      setTimeout(refreshContext, 5000)
+    } catch (e) {
+      ElMessage.error(`压缩上下文失败: ${e.message}`)
+    } finally {
+      compacting.value = false
+    }
+  }
+
+  /** 启动/重启 10 秒上下文占用轮询 */
+  function startContextWatch() {
+    stopContextWatch()
+    refreshContext()
+    contextTimer = setInterval(() => {
+      refreshContext()
+    }, 10000)
+  }
+
+  function stopContextWatch() {
+    if (contextTimer) {
+      clearInterval(contextTimer)
+      contextTimer = null
+    }
+  }
 
   // ---------- 活动状态（思考/工作/卡住检测） ----------
 
@@ -264,6 +335,7 @@ export function useOpencodeChat({ sessionId, msgListRef }) {
     lastActivityAt = 0
     stopPolling()
     stopStallWatch()
+    stopContextWatch()
     loadMessages()
   }
 
@@ -671,6 +743,7 @@ export function useOpencodeChat({ sessionId, msgListRef }) {
     stopPolling()
     stopPermWatch()
     stopStallWatch()
+    stopContextWatch()
   }
 
   // ---------- 常驻权限 watchdog ----------
@@ -697,14 +770,16 @@ export function useOpencodeChat({ sessionId, msgListRef }) {
     }
   }
 
-  // 会话切换时重启 watchdog
+  // 会话切换时重启 watchdog + 上下文占用轮询
   watch(sessionId, () => {
     startPermWatch()
+    startContextWatch()
   })
 
   function mount() {
     connectSse()
     startPermWatch()
+    startContextWatch()
   }
 
   /**
@@ -737,6 +812,7 @@ export function useOpencodeChat({ sessionId, msgListRef }) {
     messages, draft, sending, running, executing, idle,
     permVisible, permRequest, permPendingCount,
     status, stalled, restartServer,
+    contextPercent, contextLevel, compacting, compactContext,
     handleSend, replyPerm, showNextPerm,
     loadMessages, resetForSession, dispose, mount,
     renderMd, formatToolInput, formatToolOutput, scrollToBottom,

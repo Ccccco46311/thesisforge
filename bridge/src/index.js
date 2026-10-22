@@ -13,6 +13,8 @@ import {
   listAgents,
   prompt,
   getMessages,
+  getSessionInfo,
+  compactSession,
   deleteSession,
   applyProvider,
   openEventStream,
@@ -225,6 +227,32 @@ app.get('/api/opencode/sessions/:id/message', async (req, res) => {
     res.json({ code: 200, msg: 'ok', data: messages })
   } catch (e) {
     res.status(500).json({ code: 500, msg: `读取消息失败: ${e.message}`, data: null })
+  }
+})
+
+/**
+ * GET /api/opencode/sessions/:id/info
+ * 读取会话详情（含 tokens 使用量，用于展示上下文占用）。
+ */
+app.get('/api/opencode/sessions/:id/info', async (req, res) => {
+  try {
+    const info = await getSessionInfo(req.params.id)
+    res.json({ code: 200, msg: 'ok', data: info })
+  } catch (e) {
+    res.status(500).json({ code: 500, msg: `读取会话信息失败: ${e.message}`, data: null })
+  }
+})
+
+/**
+ * POST /api/opencode/sessions/:id/compact
+ * 请求压缩会话上下文（异步执行）。
+ */
+app.post('/api/opencode/sessions/:id/compact', async (req, res) => {
+  try {
+    const data = await compactSession(req.params.id)
+    res.json({ code: 200, msg: 'ok', data })
+  } catch (e) {
+    res.status(500).json({ code: 500, msg: `压缩上下文失败: ${e.message}`, data: null })
   }
 })
 

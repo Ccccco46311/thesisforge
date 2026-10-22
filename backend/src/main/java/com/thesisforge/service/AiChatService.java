@@ -182,6 +182,22 @@ public class AiChatService {
     }
 
     /**
+     * 获取会话详情（含 tokens 使用量，用于展示上下文占用）。
+     */
+    public JsonNode getSessionInfo(String sessionId) {
+        return bridgeClient.getChatSessionInfo(sessionId);
+    }
+
+    /**
+     * 请求压缩会话上下文。
+     *
+     * @return 是否成功提交
+     */
+    public boolean compactSession(String sessionId) {
+        return bridgeClient.compactChatSession(sessionId);
+    }
+
+    /**
      * 回复权限请求。
      */
     public void replyPermission(String sessionId, String requestId, String decision) {

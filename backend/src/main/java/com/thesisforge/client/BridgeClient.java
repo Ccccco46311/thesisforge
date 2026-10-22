@@ -175,6 +175,39 @@ public class BridgeClient {
     }
 
     /**
+     * 获取会话详情（含 tokens 使用量）。
+     */
+    public JsonNode getChatSessionInfo(String sessionId) {
+        try {
+            ResponseEntity<String> resp = restTemplate.getForEntity(
+                    bridgeUrl + "/api/opencode/sessions/" + sessionId + "/info", String.class);
+            JsonNode json = objectMapper.readTree(resp.getBody());
+            return json.path("data");
+        } catch (Exception e) {
+            log.warn("bridge 不可用，读取会话信息失败: {}", e.getMessage());
+            return objectMapper.createObjectNode();
+        }
+    }
+
+    /**
+     * 请求压缩会话上下文。
+     *
+     * @return 是否成功提交
+     */
+    public boolean compactChatSession(String sessionId) {
+        try {
+            ResponseEntity<String> resp = restTemplate.postForEntity(
+                    bridgeUrl + "/api/opencode/sessions/" + sessionId + "/compact",
+                    null, String.class);
+            JsonNode json = objectMapper.readTree(resp.getBody());
+            return json.path("code").asInt() == 200;
+        } catch (Exception e) {
+            log.warn("bridge 不可用，压缩会话上下文失败: {}", e.getMessage());
+            return false;
+        }
+    }
+
+    /**
      * 删除会话。
      *
      * @return 是否成功

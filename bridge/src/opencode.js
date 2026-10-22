@@ -440,6 +440,22 @@ export async function listSessions() {
 }
 
 /**
+ * 获取单个 session 的详情（含 tokens 使用量，用于展示上下文占用）。
+ */
+export async function getSessionInfo(sessionId) {
+  const json = await request('GET', `/api/session/${sessionId}`)
+  return json?.data || null
+}
+
+/**
+ * 请求压缩会话上下文（opencode 会异步在下一个 step 边界执行）。
+ */
+export async function compactSession(sessionId) {
+  const json = await request('POST', `/api/session/${sessionId}/compact`, {})
+  return json?.data || json
+}
+
+/**
  * 向 session 发送消息。
  */
 export async function prompt(sessionId, text) {

@@ -8,6 +8,10 @@ export const sendChatPrompt = (sessionId, text) =>
   request.post(`/ai/chat/sessions/${sessionId}/prompt`, { text })
 export const getChatMessages = (sessionId) =>
   request.get(`/ai/chat/sessions/${sessionId}/messages`)
+export const getChatSessionInfo = (sessionId) =>
+  request.get(`/ai/chat/sessions/${sessionId}/info`)
+export const compactChatSession = (sessionId) =>
+  request.post(`/ai/chat/sessions/${sessionId}/compact`)
 export const getChatPermissions = (sessionId) =>
   request.get(`/ai/chat/sessions/${sessionId}/permission`)
 export const replyChatPermission = (sessionId, requestId, decision) =>

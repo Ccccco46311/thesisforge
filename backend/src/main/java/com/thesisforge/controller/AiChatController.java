@@ -86,6 +86,19 @@ public class AiChatController {
         return Result.ok(aiChatService.getMessages(sessionId));
     }
 
+    @GetMapping("/sessions/{sessionId}/info")
+    public Result<JsonNode> getSessionInfo(@PathVariable String sessionId) {
+        return Result.ok(aiChatService.getSessionInfo(sessionId));
+    }
+
+    @PostMapping("/sessions/{sessionId}/compact")
+    public Result<Void> compact(@PathVariable String sessionId) {
+        if (!aiChatService.compactSession(sessionId)) {
+            return Result.fail("压缩上下文失败：bridge 不可用");
+        }
+        return Result.ok();
+    }
+
     @GetMapping("/sessions/{sessionId}/permission")
     public Result<JsonNode> listPermissions(@PathVariable String sessionId) {
         return Result.ok(aiChatService.listPermissions(sessionId));

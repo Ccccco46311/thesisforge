@@ -137,6 +137,23 @@
             >
               重启桥接服务
             </el-button>
+            <div class="status-right">
+              <el-tag
+                v-if="contextPercent > 0"
+                size="small"
+                :type="contextLevel === 'success' ? 'info' : contextLevel"
+              >
+                上下文 {{ contextPercent }}%
+              </el-tag>
+              <el-button
+                v-if="contextPercent >= 60"
+                size="small"
+                :loading="compacting"
+                @click="compactContext"
+              >
+                压缩上下文
+              </el-button>
+            </div>
           </div>
 
           <!-- 权限排队提示 -->
@@ -291,6 +308,7 @@ const {
   messages, draft, sending, running, idle,
   permVisible, permRequest, permPendingCount,
   status, stalled, restartServer,
+  contextPercent, contextLevel, compacting, compactContext,
   handleSend, replyPerm, showNextPerm,
   resetForSession, dispose, mount,
   renderMd, formatToolInput, formatToolOutput,
@@ -909,6 +927,12 @@ onBeforeUnmount(dispose)
   background: #fafbfc;
   border-top: 1px solid #f0f2f5;
   flex-shrink: 0;
+}
+.status-right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 .status-dot {
   width: 8px;

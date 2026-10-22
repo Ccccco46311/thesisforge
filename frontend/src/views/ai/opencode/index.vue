@@ -120,6 +120,23 @@
           >
             重启桥接服务
           </el-button>
+          <div class="status-right">
+            <el-tag
+              v-if="contextPercent > 0"
+              size="small"
+              :type="contextLevel === 'success' ? 'info' : contextLevel"
+            >
+              上下文 {{ contextPercent }}%
+            </el-tag>
+            <el-button
+              v-if="contextPercent >= 60"
+              size="small"
+              :loading="compacting"
+              @click="compactContext"
+            >
+              压缩上下文
+            </el-button>
+          </div>
         </div>
 
         <!-- 权限排队提示 -->
@@ -191,6 +208,8 @@ import {
   sendChatPrompt,
   getChatMessages,
   getChatPermissions,
+  getChatSessionInfo,
+  compactChatSession,
 } from '@/api/opencode'
 import { getProviderConfig, getPipeline } from '@/api/ai'
 import router from '@/router'
@@ -235,6 +254,62 @@ const STALL_TIMEOUT = 90 * 1000
 const restarting = ref(false)
 /** 整轮 AI 执行是否进行中（execution 级，区别于 step 级的 running） */
 const executing = ref(false)
+
+// ---------- 上下文占用（展示 + 压缩） ----------
+const CONTEXT_LIMIT = 1048576
+const contextInputTokens = ref(0)
+const compacting = ref(false)
+const contextPercent = computed(() => {
+  if (contextInputTokens.value <= 0) return 0
+  return Math.round((contextInputTokens.value / CONTEXT_LIMIT) * 100)
+})
+const contextLevel = computed(() => {
+  const p = contextPercent.value
+  if (p >= 90) return 'danger'
+  if (p >= 70) return 'warning'
+  return 'success'
+})
+let contextTimer = null
+
+async function refreshContext() {
+  if (!currentId.value) return
+  try {
+    const info = await getChatSessionInfo(currentId.value)
+    const tokens = info?.tokens
+    if (tokens) {
+      contextInputTokens.value = tokens.input || 0
+    }
+  } catch {
+    // 静默失败
+  }
+}
+
+async function compactContext() {
+  if (!currentId.value || compacting.value) return
+  compacting.value = true
+  try {
+    await compactChatSession(currentId.value)
+    ElMessage.success('压缩请求已提交，将在下一个步骤生效')
+    setTimeout(refreshContext, 5000)
+  } catch (e) {
+    ElMessage.error(`压缩上下文失败: ${e.message}`)
+  } finally {
+    compacting.value = false
+  }
+}
+
+function startContextWatch() {
+  stopContextWatch()
+  refreshContext()
+  contextTimer = setInterval(() => refreshContext(), 10000)
+}
+
+function stopContextWatch() {
+  if (contextTimer) {
+    clearInterval(contextTimer)
+    contextTimer = null
+  }
+}
 
 function markActivity() {
   lastActivityAt = Date.now()
@@ -337,6 +412,7 @@ onMounted(async () => {
   await loadSessions()
   connectSse()
   startPermWatch()
+  startContextWatch()
 })
 
 onBeforeUnmount(() => {
@@ -347,6 +423,7 @@ onBeforeUnmount(() => {
   clearInterval(pollTimer)
   stopPermWatch()
   stopStallWatch()
+  stopContextWatch()
 })
 
 function goPipeline() {
@@ -424,6 +501,7 @@ async function switchSession(sessionId) {
   await loadMessages(sessionId)
   scrollToBottom()
   startPermWatch()
+  startContextWatch()
 }
 
 async function loadMessages(sessionId) {
@@ -1079,6 +1157,12 @@ function scrollToBottom() {
   background: #fafbfc;
   border-bottom: 1px solid #f0f2f5;
   flex-shrink: 0;
+}
+.status-right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 .status-dot {
   width: 8px;
