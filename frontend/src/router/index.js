@@ -9,6 +9,21 @@ const router = createRouter({
       name: 'Login',
       component: () => import('@/views/login/index.vue'),
     },
+    // ===== AI 定制业务：用户端（商城前台布局，隔离目录 ai-biz）=====
+    {
+      path: '/mall',
+      component: () => import('@/views/ai-biz/layout/UserLayout.vue'),
+      redirect: '/mall/home',
+      children: [
+        {
+          path: 'home',
+          name: 'MallHome',
+          component: () => import('@/views/ai-biz/home/index.vue'),
+          meta: { title: '商城首页' },
+        },
+        // 后续子功能在 ai-biz 下追加用户端页面路由（商品/求购/订单/钱包/私信/个人中心）
+      ],
+    },
     {
       path: '/',
       component: () => import('@/layout/index.vue'),

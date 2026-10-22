@@ -66,7 +66,9 @@ async function handleLogin() {
     const data = await login(form)
     userStore.setLogin(data)
     ElMessage.success('登录成功')
-    router.push('/dashboard')
+    // 角色分流：管理员进管理后台，普通用户进商城端
+    const isAdmin = (data.roles || []).includes('admin')
+    router.push(isAdmin ? '/dashboard' : '/mall/home')
   } finally {
     loading.value = false
   }
