@@ -26,9 +26,10 @@
         </template>
       </el-table-column>
       <el-table-column prop="createdAt" label="创建时间" width="170" />
-      <el-table-column label="操作" width="240" fixed="right">
+      <el-table-column label="操作" width="320" fixed="right">
         <template #default="{ row }">
           <el-button link type="primary" @click="openDialog(row)">编辑</el-button>
+          <el-button link type="success" @click="openRoleDialog(row)">分配角色</el-button>
           <el-button link type="warning" @click="openPassword(row)">重置密码</el-button>
           <el-button link type="danger" @click="handleDelete(row)">删除</el-button>
         </template>
@@ -83,12 +84,25 @@
       <el-button type="primary" @click="savePassword">确定</el-button>
     </template>
   </el-dialog>
+
+  <!-- 分配角色弹窗 -->
+  <el-dialog v-model="roleVisible" :title="`分配角色 - ${roleForm.username}`" width="420px">
+    <el-checkbox-group v-model="roleForm.roleIds">
+      <el-checkbox v-for="r in allRoles" :key="r.id" :label="r.id" class="role-item">
+        {{ r.roleName }}（{{ r.roleKey }}）
+      </el-checkbox>
+    </el-checkbox-group>
+    <template #footer>
+      <el-button @click="roleVisible = false">取消</el-button>
+      <el-button type="primary" :loading="roleSaving" @click="saveRoles">保存</el-button>
+    </template>
+  </el-dialog>
 </template>
 
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { getUserPage, createUser, updateUser, deleteUser, resetPassword } from '@/api/system'
+import { getUserPage, createUser, updateUser, deleteUser, resetPassword, getUserRoles, assignUserRoles, getRoleList } from '@/api/system'
 
 const loading = ref(false)
 const list = ref([])
@@ -106,6 +120,12 @@ const rules = {
 
 const pwdVisible = ref(false)
 const pwdForm = reactive({ id: null, password: '' })
+
+// 分配角色
+const roleVisible = ref(false)
+const roleSaving = ref(false)
+const allRoles = ref([])
+const roleForm = reactive({ id: null, username: '', roleIds: [] })
 
 async function load() {
   loading.value = true
@@ -170,6 +190,27 @@ async function handleDelete(row) {
   load()
 }
 
+async function openRoleDialog(row) {
+  if (!allRoles.value.length) {
+    allRoles.value = await getRoleList()
+  }
+  roleForm.id = row.id
+  roleForm.username = row.username
+  roleForm.roleIds = (await getUserRoles(row.id)) || []
+  roleVisible.value = true
+}
+
+async function saveRoles() {
+  roleSaving.value = true
+  try {
+    await assignUserRoles(roleForm.id, roleForm.roleIds)
+    ElMessage.success('角色分配成功')
+    roleVisible.value = false
+  } finally {
+    roleSaving.value = false
+  }
+}
+
 onMounted(load)
 </script>
 
@@ -182,5 +223,10 @@ onMounted(load)
 .pager {
   margin-top: 16px;
   justify-content: flex-end;
+}
+.role-item {
+  display: flex;
+  margin-right: 0;
+  margin-bottom: 8px;
 }
 </style>

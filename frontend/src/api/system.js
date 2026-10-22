@@ -10,6 +10,8 @@ export const createUser = (data) => request.post('/system/user', data)
 export const updateUser = (data) => request.put('/system/user', data)
 export const resetPassword = (data) => request.put('/system/user/password', data)
 export const deleteUser = (id) => request.delete(`/system/user/${id}`)
+export const getUserRoles = (id) => request.get(`/system/user/${id}/roles`)
+export const assignUserRoles = (id, roleIds) => request.put(`/system/user/${id}/roles`, roleIds)
 
 // 角色管理
 export const getRolePage = (params) => request.get('/system/role/page', { params })
@@ -17,6 +19,8 @@ export const getRoleList = () => request.get('/system/role/list')
 export const createRole = (data) => request.post('/system/role', data)
 export const updateRole = (data) => request.put('/system/role', data)
 export const deleteRole = (id) => request.delete(`/system/role/${id}`)
+export const getRoleMenus = (id) => request.get(`/system/role/${id}/menus`)
+export const assignRoleMenus = (id, menuIds) => request.put(`/system/role/${id}/menus`, menuIds)
 
 // 菜单管理
 export const getMenuList = () => request.get('/system/menu/list')

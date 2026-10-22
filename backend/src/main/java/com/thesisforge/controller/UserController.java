@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.thesisforge.common.BusinessException;
 import com.thesisforge.common.Result;
 import com.thesisforge.entity.SysUser;
+import com.thesisforge.mapper.SysRoleMapper;
 import com.thesisforge.mapper.SysUserMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -22,6 +23,7 @@ import java.util.Map;
 public class UserController {
 
     private final SysUserMapper userMapper;
+    private final SysRoleMapper roleMapper;
     private final PasswordEncoder passwordEncoder;
 
     @GetMapping("/page")
@@ -96,6 +98,33 @@ public class UserController {
             throw new BusinessException("不允许删除内置管理员");
         }
         userMapper.deleteById(id);
+        roleMapper.deleteUserRoles(id); // 清理用户-角色关联
+        return Result.ok();
+    }
+
+    /**
+     * 查询用户已分配的角色 ID 列表。
+     */
+    @GetMapping("/{id}/roles")
+    public Result<List<Long>> getUserRoles(@PathVariable Long id) {
+        return Result.ok(roleMapper.selectRoleIdsByUserId(id));
+    }
+
+    /**
+     * 保存用户的角色分配（先删后插）。
+     */
+    @PutMapping("/{id}/roles")
+    public Result<Void> assignRoles(@PathVariable Long id,
+                                    @RequestBody List<Long> roleIds) {
+        if (id == 1L) {
+            throw new BusinessException("内置管理员角色不可修改");
+        }
+        roleMapper.deleteUserRoles(id);
+        if (roleIds != null) {
+            for (Long roleId : roleIds) {
+                roleMapper.insertUserRole(id, roleId);
+            }
+        }
         return Result.ok();
     }
 }

@@ -17,9 +17,10 @@
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="160" fixed="right">
+      <el-table-column label="操作" width="220" fixed="right">
         <template #default="{ row }">
           <el-button link type="primary" @click="openDialog(row)">编辑</el-button>
+          <el-button link type="success" @click="openMenuDialog(row)">分配菜单</el-button>
           <el-button link type="danger" @click="handleDelete(row)">删除</el-button>
         </template>
       </el-table-column>
@@ -46,12 +47,28 @@
       <el-button type="primary" :loading="saving" @click="save">保存</el-button>
     </template>
   </el-dialog>
+
+  <!-- 分配菜单弹窗 -->
+  <el-dialog v-model="menuVisible" :title="`分配菜单 - ${menuForm.roleName}`" width="420px">
+    <el-tree
+      ref="menuTreeRef"
+      :data="menuTree"
+      show-checkbox
+      node-key="id"
+      :props="{ label: 'menuName', children: 'children' }"
+      default-expand-all
+    />
+    <template #footer>
+      <el-button @click="menuVisible = false">取消</el-button>
+      <el-button type="primary" :loading="menuSaving" @click="saveMenus">保存</el-button>
+    </template>
+  </el-dialog>
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { getRolePage, createRole, updateRole, deleteRole } from '@/api/system'
+import { getRolePage, createRole, updateRole, deleteRole, getRoleMenus, assignRoleMenus, getMenuList } from '@/api/system'
 
 const loading = ref(false)
 const list = ref([])
@@ -64,6 +81,13 @@ const rules = {
   roleName: [{ required: true, message: '请输入角色名', trigger: 'blur' }],
   roleKey: [{ required: true, message: '请输入角色标识', trigger: 'blur' }],
 }
+
+// 分配菜单
+const menuVisible = ref(false)
+const menuSaving = ref(false)
+const menuTreeRef = ref()
+const menuTree = ref([])
+const menuForm = reactive({ id: null, roleName: '', menuIds: [] })
 
 async function load() {
   loading.value = true
@@ -108,6 +132,43 @@ async function handleDelete(row) {
   await deleteRole(row.id)
   ElMessage.success('删除成功')
   load()
+}
+
+function buildMenuTree(menus) {
+  const map = {}
+  menus.forEach((m) => { map[m.id] = { ...m, children: [] } })
+  const roots = []
+  menus.forEach((m) => {
+    if (m.parentId === 0) roots.push(map[m.id])
+    else if (map[m.parentId]) map[m.parentId].children.push(map[m.id])
+  })
+  return roots
+}
+
+async function openMenuDialog(row) {
+  if (!menuTree.value.length) {
+    const menus = await getMenuList()
+    menuTree.value = buildMenuTree(menus)
+  }
+  menuForm.id = row.id
+  menuForm.roleName = row.roleName
+  menuVisible.value = true
+  await nextTick()
+  const ids = (await getRoleMenus(row.id)) || []
+  menuTreeRef.value?.setCheckedKeys(ids)
+}
+
+async function saveMenus() {
+  menuSaving.value = true
+  try {
+    const checked = menuTreeRef.value?.getCheckedKeys() || []
+    const half = menuTreeRef.value?.getHalfCheckedKeys() || []
+    await assignRoleMenus(menuForm.id, [...checked, ...half])
+    ElMessage.success('菜单分配成功')
+    menuVisible.value = false
+  } finally {
+    menuSaving.value = false
+  }
 }
 
 onMounted(load)
