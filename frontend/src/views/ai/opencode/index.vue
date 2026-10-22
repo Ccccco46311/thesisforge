@@ -262,10 +262,12 @@ function stopStallWatch() {
   }
 }
 
+const ACTIVE_WINDOW = 45 * 1000 // 45 秒内有过活动都视为工作中
 const status = computed(() => {
   if (permPendingCount.value > 0) return 'waiting-permission'
   if (stalled.value) return 'stalled'
-  if (!executing.value && !sending.value) return 'idle'
+  const recentlyActive = Date.now() - lastActivityAt < ACTIVE_WINDOW
+  if (!executing.value && !sending.value && !recentlyActive) return 'idle'
   const streamingMsg = messages.value.find((m) => m.streaming)
   if (streamingMsg) {
     if (streamingMsg.text) return 'streaming'
@@ -419,6 +421,7 @@ async function switchSession(sessionId) {
   streamingKey = ''
   running.value = false
   executing.value = false
+  lastActivityAt = 0
   await loadMessages(sessionId)
   scrollToBottom()
   startPermWatch()
@@ -760,6 +763,7 @@ function handleEvent(evt) {
     running.value = false
     executing.value = false
     stalled.value = false
+    lastActivityAt = 0 // 执行结束：清空活动窗口，状态条回到「空闲」
     stopStallWatch()
     // 执行结束：用服务端最终数据校准（真实消息 ID / 完整内容 / 正确顺序）
     syncMessagesFromServer()
@@ -895,9 +899,9 @@ function startPolling() {
         running.value = false
         executing.value = false
         stalled.value = false
+        lastActivityAt = 0 // 执行结束：清空活动窗口
         stopStallWatch()
         stopPolling()
-        markActivity()
         scrollToBottom()
         return
       }
@@ -909,9 +913,9 @@ function startPolling() {
         running.value = false
         executing.value = false
         stalled.value = false
+        lastActivityAt = 0 // 执行结束：清空活动窗口
         stopStallWatch()
         stopPolling()
-        markActivity()
       }
       scrollToBottom()
     }).catch(() => {})

@@ -104,11 +104,18 @@ export function useOpencodeChat({ sessionId, msgListRef }) {
    * 当前 AI 运行状态（供界面显示）：
    * idle 空闲 / thinking 思考中 / working 执行工具中 / streaming 生成回复中 /
    * waiting-permission 等待权限确认 / stalled 疑似卡住
+   *
+   * 「活动窗口」兜底：即使 executing 因 SSE 事件偶发丢失被误重置，只要
+   * 距离最近一次 AI 活动在阈值内（AI 还在动），也不显示「空闲」，
+   * 避免「AI 在干活但状态条显示空闲」的误导。
    */
+  const ACTIVE_WINDOW = 45 * 1000 // 45 秒内有过活动都视为工作中
+
   const status = computed(() => {
     if (permPendingCount.value > 0) return 'waiting-permission'
     if (stalled.value) return 'stalled'
-    if (!executing.value && !sending.value) return 'idle'
+    const recentlyActive = Date.now() - lastActivityAt < ACTIVE_WINDOW
+    if (!executing.value && !sending.value && !recentlyActive) return 'idle'
     const streamingMsg = messages.value.find((m) => m.streaming)
     if (streamingMsg) {
       if (streamingMsg.text) return 'streaming'
@@ -254,6 +261,7 @@ export function useOpencodeChat({ sessionId, msgListRef }) {
     executing.value = false
     idle.value = true
     stalled.value = false
+    lastActivityAt = 0
     stopPolling()
     stopStallWatch()
     loadMessages()
@@ -464,6 +472,8 @@ export function useOpencodeChat({ sessionId, msgListRef }) {
       running.value = false
       executing.value = false
       stalled.value = false
+      // 执行结束：清空活动窗口，让状态条回到「空闲」
+      lastActivityAt = 0
       stopStallWatch()
       idle.value = true
       syncMessagesFromServer()
@@ -596,10 +606,11 @@ export function useOpencodeChat({ sessionId, msgListRef }) {
           running.value = false
           executing.value = false
           stalled.value = false
+          // 执行结束：清空活动窗口，让状态条回到「空闲」
+          lastActivityAt = 0
           stopStallWatch()
           idle.value = true
           stopPolling()
-          markActivity()
           scrollToBottom()
           return
         }
@@ -611,10 +622,11 @@ export function useOpencodeChat({ sessionId, msgListRef }) {
           running.value = false
           executing.value = false
           stalled.value = false
+          // 执行结束：清空活动窗口，让状态条回到「空闲」
+          lastActivityAt = 0
           stopStallWatch()
           idle.value = true
           stopPolling()
-          markActivity()
         }
         scrollToBottom()
       }).catch(() => {})
