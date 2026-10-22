@@ -212,8 +212,7 @@
       </div>
       <template #footer>
         <el-button type="danger" @click="replyPerm('reject')">拒绝</el-button>
-        <el-button @click="replyPerm('once')">仅此一次</el-button>
-        <el-button type="primary" @click="replyPerm('always')">总是允许</el-button>
+        <el-button type="primary" @click="replyPerm('once')">仅此一次</el-button>
       </template>
     </el-dialog>
   </div>
