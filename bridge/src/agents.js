@@ -33,6 +33,20 @@ const COMMON_RULES = `
 4. **不要编造**。没读过的文件不要假装读过，没跑过的命令不要假装跑过。不确定就如实说「我不确定，需要检查」。
 5. **产出必须落到文件**。本阶段要求写文档时，用写文件工具真正写入项目里的文件，而不是只在聊天里贴出来。
 6. **结束时给总结**。用 3-5 条要点总结本阶段完成了什么、产出了什么、有什么遗留问题，然后明确提示用户：确认无误后点击「确认完成，进入下一阶段」。
+
+## 隔离目录的本地独立 git 管理
+
+AI 新增的业务代码/文档放在隔离目录，这些目录**各自有一个本地独立 git 仓库**（已在主仓库 .gitignore 排除，不会进入 GitHub，也不影响框架主仓库）：
+
+- 后端业务代码 → \`backend/src/main/java/com/thesisforge/ai/\`
+- 前端业务页面 → \`frontend/src/views/ai-biz/\` + \`frontend/src/api/ai-biz.js\`
+- AI 产出文档 → \`docs/ai/\`
+
+规则：
+1. 每次在隔离目录新增/修改文件后，**在该目录执行 \`git add -A && git commit -m "..."\`**（记录开发轨迹，方便回滚）
+2. 这些独立仓库**只在本地，绝不 push**，也不与主仓库混淆
+3. 主仓库（ThesisForge 框架）保持干净：AI 新增内容不会出现在 GitHub
+4. 涉及隔离目录的 git 操作**只允许用 \`git -C <隔离目录路径> add/commit\` 或先 cd 进隔离目录再执行**，严禁在主仓库目录执行 git add 提交 AI 内容
 `
 
 /**
@@ -479,6 +493,13 @@ ${COMMON_RULES}
       { action: 'shell', resource: 'git rev-parse *', effect: 'allow' },
       { action: 'shell', resource: 'git ls-files *', effect: 'allow' },
       { action: 'shell', resource: 'git show *', effect: 'allow' },
+      // 隔离目录（AI 独立本地仓库）内的 git add/commit 放行（仅限三个隔离目录）
+      { action: 'shell', resource: 'git -C backend/src/main/java/com/thesisforge/ai add *', effect: 'allow' },
+      { action: 'shell', resource: 'git -C backend/src/main/java/com/thesisforge/ai commit *', effect: 'allow' },
+      { action: 'shell', resource: 'git -C frontend/src/views/ai-biz add *', effect: 'allow' },
+      { action: 'shell', resource: 'git -C frontend/src/views/ai-biz commit *', effect: 'allow' },
+      { action: 'shell', resource: 'git -C docs/ai add *', effect: 'allow' },
+      { action: 'shell', resource: 'git -C docs/ai commit *', effect: 'allow' },
       { action: 'shell', resource: 'Get-Location*', effect: 'allow' },
       { action: 'shell', resource: 'Get-ChildItem*', effect: 'allow' },
       { action: 'shell', resource: 'Get-Date*', effect: 'allow' },
