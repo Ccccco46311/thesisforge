@@ -84,12 +84,6 @@ const router = createRouter({
           component: () => import('@/views/ai/opencode/index.vue'),
           meta: { title: 'AI 开发' },
         },
-        {
-          path: 'ai/progress',
-          name: 'AIProgress',
-          component: () => import('@/views/ai/progress/index.vue'),
-          meta: { title: '进度计划' },
-        },
         // AI 定制业务：管理端（隔离目录 ai-biz）
         {
           path: 'admin/user-cert',

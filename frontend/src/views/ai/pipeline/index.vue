@@ -182,16 +182,62 @@
         </template>
       </div>
 
-      <!-- 右：产出预览 -->
+      <!-- 右：产出预览 / 开发阶段进度计划 -->
       <div class="doc-panel">
         <div class="doc-header">
-          <span>阶段产出</span>
-          <el-tag v-if="currentStage?.outputPath" size="small" type="info">
-            {{ currentStage.outputPath }}
-          </el-tag>
+          <template v-if="isDevStage">
+            <span>开发进度</span>
+            <el-tag size="small" type="info">进度计划</el-tag>
+          </template>
+          <template v-else>
+            <span>阶段产出</span>
+            <el-tag v-if="currentStage?.outputPath" size="small" type="info">
+              {{ currentStage.outputPath }}
+            </el-tag>
+          </template>
         </div>
         <div class="doc-content">
-          <DocPreview :key="docKey" :path="docPath" :placeholder="docPlaceholder" />
+          <template v-if="isDevStage">
+            <!-- 开发阶段：进度计划面板 -->
+            <div v-if="!plan" class="dev-plan-empty">
+              <el-empty description="暂无进度计划" :image-size="80" />
+            </div>
+            <div v-else class="dev-plan">
+              <div class="dev-plan-title">
+                <span>{{ plan.plan.title }}</span>
+                <el-tag size="small" :type="planStatusType">{{ planStatusText }}</el-tag>
+              </div>
+              <p class="dev-plan-desc">{{ plan.plan.description }}</p>
+              <div class="dev-plan-items">
+                <div v-for="(item, idx) in plan.items" :key="item.id" class="dev-plan-item">
+                  <div class="dev-item-index" :class="{ done: item.status === 'done' }">
+                    {{ idx + 1 }}
+                  </div>
+                  <div class="dev-item-body">
+                    <div class="dev-item-title">
+                      {{ item.title }}
+                      <el-tag v-if="item.status === 'done'" type="success" size="small">已完成</el-tag>
+                      <el-tag v-else-if="item.status === 'doing'" type="warning" size="small">开发中</el-tag>
+                      <el-tag v-else type="info" size="small">待开发</el-tag>
+                    </div>
+                    <div v-if="item.description" class="dev-item-desc">{{ item.description }}</div>
+                  </div>
+                  <el-button
+                    v-if="item.status !== 'done'"
+                    type="success"
+                    size="small"
+                    :loading="completingId === item.id"
+                    @click="completeItem(item)"
+                  >
+                    ✓ 完成
+                  </el-button>
+                </div>
+              </div>
+            </div>
+          </template>
+          <template v-else>
+            <DocPreview :key="docKey" :path="docPath" :placeholder="docPlaceholder" />
+          </template>
         </div>
       </div>
     </div>
@@ -229,6 +275,7 @@ import DocPreview from '@/components/DocPreview.vue'
 import { useOpencodeChat } from '@/composables/useOpencodeChat'
 import {
   getPipeline, startPipeline, advanceStage, reopenStage, resetPipeline,
+  getPlan, completePlanItem,
 } from '@/api/ai'
 
 const router = useRouter()
@@ -250,6 +297,51 @@ const {
 } = useOpencodeChat({ sessionId, msgListRef })
 
 const restarting = ref(false)
+
+// ---------- 开发阶段进度计划 ----------
+const plan = ref(null)
+const completingId = ref(null)
+
+const isDevStage = computed(() => currentStage.value?.stageCode === 'development')
+
+const planStatusText = computed(() => {
+  if (!plan.value?.items?.length) return ''
+  const items = plan.value.items
+  const doneCount = items.filter((i) => i.status === 'done').length
+  if (doneCount === items.length) return '已完成'
+  if (doneCount > 0) return '进行中'
+  return '待开发'
+})
+
+const planStatusType = computed(() => {
+  if (!plan.value?.items?.length) return 'info'
+  const items = plan.value.items
+  const doneCount = items.filter((i) => i.status === 'done').length
+  if (doneCount === items.length) return 'success'
+  if (doneCount > 0) return 'warning'
+  return 'info'
+})
+
+async function loadPlan() {
+  try {
+    plan.value = await getPlan()
+  } catch {
+    plan.value = null
+  }
+}
+
+async function completeItem(item) {
+  completingId.value = item.id
+  try {
+    await completePlanItem(item.id)
+    ElMessage.success(`已认定节点：${item.title}`)
+    await loadPlan()
+  } catch (e) {
+    ElMessage.error(`认定失败: ${e.response?.data?.msg || e.message}`)
+  } finally {
+    completingId.value = null
+  }
+}
 
 // ---------- 计算属性 ----------
 
@@ -377,6 +469,10 @@ function bindCurrentSession() {
     resetForSession()
   } else {
     messages.value = []
+  }
+  // 进入开发阶段时加载进度计划
+  if (currentStage.value?.stageCode === 'development') {
+    loadPlan()
   }
 }
 
@@ -896,5 +992,71 @@ onBeforeUnmount(dispose)
   margin: 0;
   white-space: pre-wrap;
   word-break: break-all;
+}
+
+/* 开发阶段进度计划面板 */
+.dev-plan-empty {
+  padding-top: 40px;
+}
+.dev-plan-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
+  font-weight: 600;
+  color: #111827;
+  margin-bottom: 6px;
+}
+.dev-plan-desc {
+  color: #6b7280;
+  font-size: 13px;
+  margin-bottom: 12px;
+  line-height: 1.6;
+}
+.dev-plan-items {
+  border-top: 1px solid #f3f4f6;
+}
+.dev-plan-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid #f3f4f6;
+}
+.dev-item-index {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: #e4e7ed;
+  color: #909399;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.dev-item-index.done {
+  background: #67c23a;
+  color: #fff;
+}
+.dev-item-body {
+  flex: 1;
+  min-width: 0;
+}
+.dev-item-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #303133;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.dev-item-desc {
+  margin-top: 3px;
+  color: #909399;
+  font-size: 12px;
+  line-height: 1.5;
 }
 </style>
