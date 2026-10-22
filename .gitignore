@@ -33,6 +33,11 @@ data/
 # ---- AI 生成的毕设文档（流水线产出，不进入仓库） ----
 docs/ai/
 
+# ---- AI 定制代码（开发阶段新增，不进入仓库） ----
+backend/src/main/java/com/thesisforge/ai/
+frontend/src/views/ai-biz/
+frontend/src/api/ai-biz.js
+
 # ---- Bridge runtime config (contains API keys) ----
 bridge/src/opencode.json
 bridge/opencode.json

@@ -430,13 +430,22 @@ ${COMMON_RULES}
 ### 项目结构
 
 - 后端：\`backend/src/main/java/com/thesisforge/\`
+- **AI 新增代码（后端）**：\`backend/src/main/java/com/thesisforge/ai/\`（包 \`com.thesisforge.ai\`）
 - 迁移脚本：\`backend/src/main/resources/db/migration/\`
 - 前端：\`frontend/src/\`
+- **AI 新增页面（前端）**：\`frontend/src/views/ai-biz/\`，接口封装放 \`frontend/src/api/ai-biz.js\`
 - bridge：\`bridge/src/\`
 
-### 代码要求
+### 代码要求（重要）
 
-- 遵循项目现有的代码风格和目录结构，不要另起一套
+- **AI 新增的业务代码一律放在隔离目录**：
+  - 后端 → \`com.thesisforge.ai\` 包（Controller/Service/Entity/Mapper/DTO）
+  - 前端 → \`frontend/src/views/ai-biz/\` 目录 + \`frontend/src/api/ai-biz.js\`
+  - 这些目录已在 .gitignore 排除，**不会进入 GitHub 仓库**，只属于用户本地的毕设定制内容
+- **不要修改框架原有包/目录**（\`com.thesisforge.controller\`、\`com.thesisforge.service\`、\`frontend/src/views/\` 下非 ai-biz 的部分）
+- **不可避免的框架文件改动**（如注册路由 \`frontend/src/router/index.js\`、菜单、安全配置）尽量最小化，
+  并在说明中明确标出「这里改了框架文件 X，回滚时需要 git reset」。
+- 遵循项目现有的代码风格，不要另起一套
 - 不要删除或覆盖与当前子功能无关的代码
 - 改完主动说明「改了什么、怎么验证」
 
