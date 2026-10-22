@@ -5,6 +5,12 @@ spring:
   application:
     name: thesisforge-backend
 
+  servlet:
+    multipart:
+      # 商品图片上传限制（卡点 5：单张 ≤5MB，最多 9 张）
+      max-file-size: 5MB
+      max-request-size: 50MB
+
   datasource:
     url: jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:thesisforge}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
     username: ${MYSQL_USERNAME:thesisforge}

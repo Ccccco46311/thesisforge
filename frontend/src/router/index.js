@@ -32,7 +32,25 @@ const router = createRouter({
           component: () => import('@/views/ai-biz/profile/index.vue'),
           meta: { title: '个人中心' },
         },
-        // 后续子功能在 ai-biz 下追加用户端页面路由（商品/求购/订单/钱包/私信/个人中心）
+        {
+          path: 'publish',
+          name: 'MallPublish',
+          component: () => import('@/views/ai-biz/publish/index.vue'),
+          meta: { title: '发布商品' },
+        },
+        {
+          path: 'mygoods',
+          name: 'MallMyGoods',
+          component: () => import('@/views/ai-biz/mygoods/index.vue'),
+          meta: { title: '我的商品' },
+        },
+        {
+          path: 'goods/:id',
+          name: 'MallGoodsDetail',
+          component: () => import('@/views/ai-biz/goods/detail.vue'),
+          meta: { title: '商品详情' },
+        },
+        // 后续子功能在 ai-biz 下追加用户端页面路由（求购/订单/钱包/私信/个人中心）
       ],
     },
     {
@@ -90,6 +108,12 @@ const router = createRouter({
           name: 'AdminUserCert',
           component: () => import('@/views/ai-biz/admin/user-cert/index.vue'),
           meta: { title: '校园认证信息' },
+        },
+        {
+          path: 'admin/goods-audit',
+          name: 'AdminGoodsAudit',
+          component: () => import('@/views/ai-biz/admin/goods-audit/index.vue'),
+          meta: { title: '商品审核' },
         },
       ],
     },
