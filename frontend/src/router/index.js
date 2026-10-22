@@ -9,6 +9,11 @@ const router = createRouter({
       name: 'Login',
       component: () => import('@/views/login/index.vue'),
     },
+    {
+      path: '/register',
+      name: 'Register',
+      component: () => import('@/views/ai-biz/register/index.vue'),
+    },
     // ===== AI 定制业务：用户端（商城前台布局，隔离目录 ai-biz）=====
     {
       path: '/mall',
@@ -20,6 +25,12 @@ const router = createRouter({
           name: 'MallHome',
           component: () => import('@/views/ai-biz/home/index.vue'),
           meta: { title: '商城首页' },
+        },
+        {
+          path: 'profile',
+          name: 'MallProfile',
+          component: () => import('@/views/ai-biz/profile/index.vue'),
+          meta: { title: '个人中心' },
         },
         // 后续子功能在 ai-biz 下追加用户端页面路由（商品/求购/订单/钱包/私信/个人中心）
       ],
@@ -79,6 +90,13 @@ const router = createRouter({
           component: () => import('@/views/ai/progress/index.vue'),
           meta: { title: '进度计划' },
         },
+        // AI 定制业务：管理端（隔离目录 ai-biz）
+        {
+          path: 'admin/user-cert',
+          name: 'AdminUserCert',
+          component: () => import('@/views/ai-biz/admin/user-cert/index.vue'),
+          meta: { title: '校园认证信息' },
+        },
       ],
     },
   ],
@@ -87,7 +105,8 @@ const router = createRouter({
 // 全局前置守卫：未登录或 token 已过期跳转登录页
 router.beforeEach((to, from, next) => {
   const userStore = useUserStore()
-  if (to.path !== '/login' && !userStore.isLogin) {
+  const publicPages = ['/login', '/register']
+  if (!publicPages.includes(to.path) && !userStore.isLogin) {
     userStore.logout() // 清理过期 token，避免残留
     next('/login')
   } else {
