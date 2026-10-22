@@ -77,7 +77,12 @@ ThesisForge/
 
 ## 🚀 快速开始
 
-> 前置要求：Node 18+（推荐 20/24）、JDK 17+、Maven、MySQL 8+
+> 前置要求：**Node 18+（推荐 20/24）**、JDK 17+、Maven、MySQL 8+
+
+> ⚠️ **Node 版本提醒**：本项目的 Vite 5 与 bridge 需要 Node 18+。
+> 如果你的机器默认 node 是旧版本（如 v16），务必先切换到 18+ 再启动，
+> 否则前端会报 `crypto.getRandomValues is not a function`、bridge 会报 `fetch is not defined`。
+> 使用 nvm 时：`nvm use 20`（或 24），再用 `node -v` 确认版本 ≥ 18。
 
 ```bash
 # 1. 克隆项目
