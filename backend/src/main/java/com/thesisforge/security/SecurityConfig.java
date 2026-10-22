@@ -42,6 +42,8 @@ public class SecurityConfig {
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/api/auth/login", "/api/auth/register").permitAll()
+                        // 商品图片等静态资源（/uploads/**）公开访问，img 标签加载不带 token
+                        .requestMatchers("/uploads/**").permitAll()
                         .requestMatchers("/error").permitAll()
                         .anyRequest().authenticated())
                 // 未认证 / token 无效或过期：返回 401 + 统一 JSON（Spring Security 默认返回 403，会让前端误判为无权限）
