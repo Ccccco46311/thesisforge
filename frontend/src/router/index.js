@@ -45,6 +45,12 @@ const router = createRouter({
           meta: { title: '我的商品' },
         },
         {
+          path: 'favorites',
+          name: 'MallFavorites',
+          component: () => import('@/views/ai-biz/favorites/index.vue'),
+          meta: { title: '我的收藏' },
+        },
+        {
           path: 'goods/:id',
           name: 'MallGoodsDetail',
           component: () => import('@/views/ai-biz/goods/detail.vue'),
