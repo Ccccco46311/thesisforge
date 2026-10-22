@@ -38,6 +38,9 @@ backend/src/main/java/com/thesisforge/ai/
 frontend/src/views/ai-biz/
 frontend/src/api/ai-biz.js
 
+# ---- AI 业务迁移脚本（开发阶段新增，不进入仓库） ----
+backend/src/main/resources/db/migration-biz/
+
 # ---- Bridge runtime config (contains API keys) ----
 bridge/src/opencode.json
 bridge/opencode.json

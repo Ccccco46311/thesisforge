@@ -13,7 +13,8 @@ spring:
 
   flyway:
     enabled: true
-    locations: classpath:db/migration
+    # 框架迁移 + AI 业务迁移（隔离目录，不进 git）
+    locations: classpath:db/migration,classpath:db/migration-biz
     # 生产环境务必关闭，v1 面向本机开发
     clean-disabled: true
 

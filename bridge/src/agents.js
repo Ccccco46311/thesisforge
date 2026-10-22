@@ -446,7 +446,10 @@ ${COMMON_RULES}
 2. 开始前先读设计文档和计划，确认当前要做哪个子功能（用户没指定时，取计划里第一个未完成的）。
 3. 动手前用 3-5 行说明：要改哪些文件、加哪些表、加哪些接口。
 4. 实现顺序建议：数据库表 → 后端实体/Mapper → 后端 Service/Controller → 前端页面 → 联调。
-5. **数据库结构变更必须写 Flyway 迁移脚本**（\`backend/src/main/resources/db/migration/V{n}__xxx.sql\`），不要直接改已有迁移文件。
+5. **数据库结构变更必须写 Flyway 迁移脚本，业务脚本写隔离目录**：
+   - **业务表迁移脚本**写 \`backend/src/main/resources/db/migration-biz/V{n}__xxx.sql\`（隔离目录，不进 git），
+     版本号从 **V2000 起递增**（如 \`V2003__xxx.sql\`）；**不要**写进框架的 \`db/migration/\`（那是 V1000 段，框架专用）
+   - 不要修改已有迁移文件
    **新建的业务表名必须以需求文档「数据库表前缀」章节确定的前缀开头**（如 \`xyesjy_user\`、\`xyesjy_order\`），
    不要与框架已有的系统表（\`sys_user\`、\`sys_role\` 等）混淆。
 6. 每完成一个子功能，主动告诉用户「这个功能做完了，可以点『完成』认定节点」。
@@ -456,7 +459,8 @@ ${COMMON_RULES}
 
 - 后端：\`backend/src/main/java/com/thesisforge/\`
 - **AI 新增代码（后端）**：\`backend/src/main/java/com/thesisforge/ai/\`（包 \`com.thesisforge.ai\`）
-- 迁移脚本：\`backend/src/main/resources/db/migration/\`
+- 框架迁移脚本：\`backend/src/main/resources/db/migration/\`（V1000 段，框架专用，**不要改**）
+- **AI 业务迁移脚本**：\`backend/src/main/resources/db/migration-biz/\`（V2000 段，隔离目录，不进 git）
 - 前端：\`frontend/src/\`
 - **AI 新增页面（前端）**：\`frontend/src/views/ai-biz/\`，接口封装放 \`frontend/src/api/ai-biz.js\`
 - bridge：\`bridge/src/\`
@@ -702,7 +706,7 @@ ${COMMON_RULES}
 ## 工作方式
 
 - 先理解需求，不清楚就问，不要猜
-- 动手前说明要改什么，涉及数据库结构变更必须写 Flyway 迁移脚本
+- 动手前说明要改什么，涉及数据库结构变更必须写 Flyway 迁移脚本（业务表脚本写 \`backend/src/main/resources/db/migration-biz/\`，V2000+ 版本；不要写进框架的 \`db/migration/\`）
 - 遵循项目现有代码风格，不要另起一套
 - 改完说明改了什么、怎么验证
 - 遇到不确定的技术细节，如实说明并给出验证方法`,
