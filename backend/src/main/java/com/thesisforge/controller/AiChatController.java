@@ -113,6 +113,31 @@ public class AiChatController {
     }
 
     /**
+     * 列出会话挂起的表单（question 工具的选择题）。
+     */
+    @GetMapping("/sessions/{sessionId}/form")
+    public Result<JsonNode> listForms(@PathVariable String sessionId) {
+        return Result.ok(aiChatService.listForms(sessionId));
+    }
+
+    /**
+     * 回复会话表单（question 工具的选择题），提交后会话继续执行。
+     */
+    @PostMapping("/sessions/{sessionId}/form/{formId}/reply")
+    public Result<Void> replyForm(@PathVariable String sessionId,
+                                  @PathVariable String formId,
+                                  @RequestBody Map<String, Object> body) {
+        Object answer = body.get("answer");
+        if (!(answer instanceof Map)) {
+            return Result.fail("表单答案格式不正确");
+        }
+        @SuppressWarnings("unchecked")
+        Map<String, Object> answerMap = (Map<String, Object>) answer;
+        aiChatService.replyForm(sessionId, formId, answerMap);
+        return Result.ok();
+    }
+
+    /**
      * 为权限请求生成一句中文执行描述 + 风险点。
      * 模型不可用时返回 data=null，由前端降级显示。
      */

@@ -21,6 +21,8 @@ import {
   replyPermission,
   listPermissions,
   describePermission,
+  listForms,
+  replyForm,
   PROJECT_ROOT,
 } from './opencode.js'
 
@@ -299,6 +301,37 @@ app.post('/api/ai/permission/describe', async (req, res) => {
     res.json({ code: 200, msg: 'ok', data })
   } catch (e) {
     res.json({ code: 200, msg: 'ok', data: null })
+  }
+})
+
+/**
+ * GET /api/opencode/sessions/:id/form
+ * 读取会话挂起的表单（question 工具的选择题）。
+ */
+app.get('/api/opencode/sessions/:id/form', async (req, res) => {
+  try {
+    const forms = await listForms(req.params.id)
+    res.json({ code: 200, msg: 'ok', data: forms })
+  } catch (e) {
+    res.status(500).json({ code: 500, msg: `读取表单失败: ${e.message}`, data: null })
+  }
+})
+
+/**
+ * POST /api/opencode/sessions/:id/form/:formId/reply
+ * body: { answer: { [fieldKey]: value } }
+ * 回复表单（question 工具的选择题），提交后会话继续执行。
+ */
+app.post('/api/opencode/sessions/:id/form/:formId/reply', async (req, res) => {
+  try {
+    const answer = req.body?.answer
+    if (!answer || typeof answer !== 'object' || Array.isArray(answer)) {
+      return res.status(400).json({ code: 400, msg: 'answer 必须是对象', data: null })
+    }
+    await replyForm(req.params.id, req.params.formId, answer)
+    res.json({ code: 200, msg: 'ok', data: true })
+  } catch (e) {
+    res.status(500).json({ code: 500, msg: `回复表单失败: ${e.message}`, data: null })
   }
 })
 

@@ -165,6 +165,14 @@
             </el-button>
           </div>
 
+          <!-- 选择题排队提示 -->
+          <div v-if="questionPendingCount > 0 && !questionVisible" class="perm-banner">
+            <span>🤔 有 {{ questionPendingCount }} 个选择题等待你确认</span>
+            <el-button size="small" type="primary" @click="checkPendingQuestions">
+              立即查看
+            </el-button>
+          </div>
+
           <!-- 输入区 -->
           <div class="chat-input">
             <el-input
@@ -267,6 +275,14 @@
       @allow="replyPerm('once')"
       @reject="replyPerm('reject')"
     />
+
+    <!-- AI 选择题弹窗（question 工具） -->
+    <QuestionDialog
+      v-model="questionVisible"
+      :question="questionData"
+      @confirm="submitQuestionAnswer"
+      @close="closeQuestion"
+    />
   </div>
 </template>
 
@@ -279,6 +295,7 @@ import {
 } from '@element-plus/icons-vue'
 import DocPreview from '@/components/DocPreview.vue'
 import PermissionDialog from '@/components/PermissionDialog.vue'
+import QuestionDialog from '@/components/QuestionDialog.vue'
 import { useOpencodeChat } from '@/composables/useOpencodeChat'
 import {
   getPipeline, startPipeline, advanceStage, reopenStage, resetPipeline,
@@ -297,6 +314,8 @@ const sessionId = ref('')
 const {
   messages, draft, sending, running, idle,
   permVisible, permRequest, permPendingCount,
+  questionVisible, questionData, questionPendingCount,
+  submitQuestionAnswer, closeQuestion, checkPendingQuestions,
   status, stalled, restartServer,
   contextPercent, contextLevel, showCompactButton, compacting, compactHint, compactContext,
   handleSend, replyPerm, showNextPerm,

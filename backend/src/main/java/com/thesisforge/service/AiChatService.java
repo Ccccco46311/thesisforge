@@ -13,6 +13,7 @@ import org.springframework.stereotype.Service;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * AI 聊天会话服务：会话记录存取 + 转发 bridge。
@@ -212,6 +213,25 @@ public class AiChatService {
      */
     public JsonNode listPermissions(String sessionId) {
         return bridgeClient.listChatPermissions(sessionId);
+    }
+
+    /**
+     * 列出会话挂起的表单（question 工具的选择题，前端弹窗兜底轮询用）。
+     */
+    public JsonNode listForms(String sessionId) {
+        return bridgeClient.listChatForms(sessionId);
+    }
+
+    /**
+     * 回复会话表单（question 工具的选择题），提交后会话继续执行。
+     */
+    public void replyForm(String sessionId, String formId, Map<String, Object> answer) {
+        if (answer == null || answer.isEmpty()) {
+            throw new com.thesisforge.common.BusinessException("表单答案不能为空");
+        }
+        if (!bridgeClient.replyChatForm(sessionId, formId, answer)) {
+            throw new com.thesisforge.common.BusinessException("回复表单失败：bridge 不可用");
+        }
     }
 
     /**

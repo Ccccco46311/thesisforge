@@ -286,6 +286,45 @@ public class BridgeClient {
         }
     }
 
+    // ---------- 会话表单（question 工具） ----------
+
+    /**
+     * 列出会话挂起的表单（question 工具的选择题）。
+     */
+    public JsonNode listChatForms(String sessionId) {
+        try {
+            ResponseEntity<String> resp = restTemplate.getForEntity(
+                    bridgeUrl + "/api/opencode/sessions/" + sessionId + "/form", String.class);
+            JsonNode json = objectMapper.readTree(resp.getBody());
+            return json.path("data");
+        } catch (Exception e) {
+            log.warn("bridge 不可用，读取表单失败: {}", e.getMessage());
+            return objectMapper.createArrayNode();
+        }
+    }
+
+    /**
+     * 回复会话表单（question 工具的选择题），提交后会话继续执行。
+     *
+     * @param answer 形如 { q0: "B. 响应闭环（推荐）" }
+     */
+    public boolean replyChatForm(String sessionId, String formId, Map<String, Object> answer) {
+        try {
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            HttpEntity<Map<String, Object>> entity =
+                    new HttpEntity<>(Map.of("answer", answer), headers);
+            restTemplate.exchange(
+                    bridgeUrl + "/api/opencode/sessions/" + sessionId
+                            + "/form/" + formId + "/reply",
+                    HttpMethod.POST, entity, String.class);
+            return true;
+        } catch (Exception e) {
+            log.warn("bridge 不可用，回复表单失败: {}", e.getMessage());
+            return false;
+        }
+    }
+
     /**
      * 获取 OpenCode 运行状态。
      */

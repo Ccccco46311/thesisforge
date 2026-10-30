@@ -146,6 +146,12 @@
           <el-button size="small" type="primary" @click="showNextPerm" v-if="!permVisible">立即查看</el-button>
         </div>
 
+        <!-- 选择题排队提示 -->
+        <div v-if="questionPendingCount > 0 && !questionVisible" class="perm-banner">
+          <span>🤔 有 {{ questionPendingCount }} 个选择题等待你确认</span>
+          <el-button size="small" type="primary" @click="checkPendingQuestions">立即查看</el-button>
+        </div>
+
         <!-- 输入区 -->
         <div class="chat-input">
           <div class="input-box">
@@ -182,6 +188,14 @@
       @allow="replyPerm('once')"
       @reject="replyPerm('reject')"
     />
+
+    <!-- AI 选择题弹窗（question 工具） -->
+    <QuestionDialog
+      v-model="questionVisible"
+      :question="questionData"
+      @confirm="submitQuestionAnswer"
+      @close="closeQuestion"
+    />
   </div>
 </template>
 
@@ -197,11 +211,14 @@ import {
   sendChatPrompt,
   getChatMessages,
   getChatPermissions,
+  getChatForms,
+  replyChatForm,
   getChatSessionInfo,
   compactChatSession,
 } from '@/api/opencode'
 import { getProviderConfig, getPipeline } from '@/api/ai'
 import PermissionDialog from '@/components/PermissionDialog.vue'
+import QuestionDialog from '@/components/QuestionDialog.vue'
 import router from '@/router'
 import { useUserStore } from '@/store/user'
 import { getToken } from '@/utils/authStorage'
@@ -233,6 +250,16 @@ let permTimer = null
 // 排队待确认的权限数量（含当前弹窗中的）
 const permPendingCount = computed(() =>
   (permVisible.value ? 1 : 0) + permQueue.value.length)
+
+// 选择题弹窗（OpenCode question 工具 → serve 表单）
+const questionVisible = ref(false)
+const questionData = ref(null)
+const questionQueue = ref([])
+const seenQuestionIds = new Set()
+let questionTimer = null
+
+const questionPendingCount = computed(() =>
+  (questionVisible.value ? 1 : 0) + questionQueue.value.length)
 
 // SSE
 let sseController = null
@@ -474,11 +501,16 @@ onBeforeUnmount(() => {
   sseAborted = true
   clearTimeout(sseTimer)
   clearTimeout(permTimer)
+  clearTimeout(questionTimer)
   sseController?.abort()
   clearInterval(pollTimer)
   stopPermWatch()
   stopStallWatch()
   stopContextWatch()
+  questionQueue.value = []
+  seenQuestionIds.clear()
+  questionData.value = null
+  questionVisible.value = false
 })
 
 function goPipeline() {
@@ -553,6 +585,11 @@ async function switchSession(sessionId) {
   running.value = false
   executing.value = false
   lastActivityAt = 0
+  // 切换会话：清空选择题弹窗状态
+  questionQueue.value = []
+  seenQuestionIds.clear()
+  questionData.value = null
+  questionVisible.value = false
   await loadMessages(sessionId)
   scrollToBottom()
   startPermWatch()
@@ -924,6 +961,11 @@ function handleEvent(evt) {
     return
   }
 
+  if (type === 'question.asked') {
+    handleQuestionAsked()
+    return
+  }
+
   if (type === 'session.execution.started') {
     running.value = true
     executing.value = true
@@ -1028,6 +1070,88 @@ async function checkPendingPerms() {
   }
 }
 
+// ---------- 选择题（question 工具 → serve 表单） ----------
+
+function normalizeQuestionForm(form) {
+  const fields = (form.fields || []).map((f) => ({
+    key: f.key,
+    title: f.title,
+    description: f.description,
+    type: f.type,
+    options: f.options || [],
+    custom: !!f.custom,
+    selected: '',
+  }))
+  return { formId: form.id, title: form.title || '选择题', fields }
+}
+
+function showNextQuestion() {
+  while (questionQueue.value.length) {
+    const q = questionQueue.value.shift()
+    if (!q) continue
+    questionData.value = q
+    questionVisible.value = true
+    clearTimeout(questionTimer)
+    questionTimer = setTimeout(() => {
+      if (questionVisible.value) ElMessage.warning('选择题长时间未确认，可随时点「查看题目」重新弹出')
+    }, 5 * 60 * 1000)
+    return
+  }
+}
+
+function handleQuestionAsked() {
+  // question.asked 事件里没有 formId，具体题目靠拉取表单拿；触发一次拉取即可
+  checkPendingQuestions()
+}
+
+async function checkPendingQuestions() {
+  if (!currentId.value) return
+  let forms = []
+  try {
+    forms = await getChatForms(currentId.value)
+  } catch {
+    return
+  }
+  if (!Array.isArray(forms) || !forms.length) return
+  for (const f of forms) {
+    if (f.id && !seenQuestionIds.has(f.id)) {
+      seenQuestionIds.add(f.id)
+      questionQueue.value.push(normalizeQuestionForm(f))
+    }
+  }
+  if (questionQueue.value.length && !questionVisible.value) {
+    showNextQuestion()
+  }
+}
+
+async function submitQuestionAnswer(answers) {
+  const q = questionData.value
+  if (!q) return
+  try {
+    await replyChatForm(currentId.value, q.formId, answers)
+    ElMessage.success('已确认，AI 继续执行')
+  } catch (e) {
+    ElMessage.error(`提交选择失败: ${e.message}`)
+    return
+  }
+  questionData.value = null
+  questionVisible.value = false
+  clearTimeout(questionTimer)
+  showNextQuestion()
+  syncMessagesFromServer()
+}
+
+function closeQuestion() {
+  // 暂不回答：从 seen 里移除，下次轮询会重新弹出（不回答 AI 会一直等待）
+  if (questionData.value) {
+    seenQuestionIds.delete(questionData.value.formId)
+  }
+  questionData.value = null
+  questionVisible.value = false
+  clearTimeout(questionTimer)
+  showNextQuestion()
+}
+
 // ---------- 兜底轮询 ----------
 
 function startPolling() {
@@ -1036,6 +1160,7 @@ function startPolling() {
     if (!currentId.value) return
     const mySeq = ++pollSeq
     checkPendingPerms()
+    checkPendingQuestions()
     getChatMessages(currentId.value).then((raw) => {
       if (mySeq !== pollSeq) return
       const list = (raw && Array.isArray(raw)) ? raw : []
@@ -1093,9 +1218,11 @@ function startPermWatch() {
   if (!currentId.value) return
   permWatchTimer = setInterval(() => {
     checkPendingPerms()
+    checkPendingQuestions()
   }, 3000)
   // 启动即查一次，避免 SSE 事件在订阅前已发生
   checkPendingPerms()
+  checkPendingQuestions()
 }
 
 function stopPermWatch() {

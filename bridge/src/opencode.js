@@ -219,18 +219,19 @@ export async function stopServer() {
   const proc = serverProcess
   serverProcess = null
   serverUrl = null
-  if (!proc || proc.exitCode !== null) return
-
-  const exited = new Promise((resolve) => proc.once('exit', resolve))
-  try {
-    proc.kill()
-  } catch {
-    // 进程可能已退出
+  if (proc && proc.exitCode === null) {
+    const exited = new Promise((resolve) => proc.once('exit', resolve))
+    try {
+      proc.kill()
+    } catch {
+      // 进程可能已退出
+    }
+    // 等待进程退出，最多 8 秒
+    const timeout = new Promise((resolve) => setTimeout(resolve, 8000))
+    await Promise.race([exited, timeout])
   }
-  // 等待进程退出，最多 8 秒
-  const timeout = new Promise((resolve) => setTimeout(resolve, 8000))
-  await Promise.race([exited, timeout])
-  // 等待端口真正释放（轮询探测，最多 10 秒）
+  // 无论是否托管了 serve 子进程（bridge 重启后可能「认领」了旧 serve），
+  // 都确保端口真正释放，必要时强杀占用进程。
   await waitForPortFree(SERVE_PORT, 10000)
 }
 
@@ -561,6 +562,31 @@ export async function listPermissions(sessionId) {
  */
 export async function replyPermission(sessionId, requestId, decision) {
   await request('POST', `/api/session/${sessionId}/permission/${requestId}/reply`, { decision })
+  return true
+}
+
+// ---------- 会话表单（question 工具） ----------
+
+/**
+ * 列出会话挂起的表单。
+ * OpenCode 的 question 交互工具在 serve 模式下以「表单」形式呈现：
+ * 模型调用 question 后，serve 生成一个 pending form（含题目和选项），
+ * 直到客户端通过 form/{formId}/reply 提交答案，会话才会继续。
+ * 之前网页端没有处理这条链路，导致 question 一直 running、AI 卡住不回复。
+ */
+export async function listForms(sessionId) {
+  const json = await request('GET', `/api/session/${sessionId}/form`)
+  return json?.data || []
+}
+
+/**
+ * 回复会话表单（question 工具的选择题）。
+ * @param {string} sessionId
+ * @param {string} formId
+ * @param {object} answer 形如 { q0: "B. 响应闭环（推荐）" }，字段 key 与表单 fields 对应
+ */
+export async function replyForm(sessionId, formId, answer) {
+  await request('POST', `/api/session/${sessionId}/form/${formId}/reply`, { answer })
   return true
 }
 

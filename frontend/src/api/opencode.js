@@ -18,4 +18,8 @@ export const describeChatPermission = (data) =>
   request.post('/ai/chat/permission/describe', data, { _silent: true })
 export const replyChatPermission = (sessionId, requestId, decision) =>
   request.post(`/ai/chat/sessions/${sessionId}/permission/${requestId}/reply`, { decision })
+export const getChatForms = (sessionId) =>
+  request.get(`/ai/chat/sessions/${sessionId}/form`)
+export const replyChatForm = (sessionId, formId, answer) =>
+  request.post(`/ai/chat/sessions/${sessionId}/form/${formId}/reply`, { answer })
 export const getChatStatus = () => request.get('/ai/chat/status')

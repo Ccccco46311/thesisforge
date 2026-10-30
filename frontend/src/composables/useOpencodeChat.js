@@ -5,6 +5,8 @@ import {
   sendChatPrompt,
   getChatMessages,
   getChatPermissions,
+  getChatForms,
+  replyChatForm,
   getChatSessionInfo,
   compactChatSession,
 } from '@/api/opencode'
@@ -39,6 +41,13 @@ export function useOpencodeChat({ sessionId, msgListRef }) {
 
   const permPendingCount = computed(() =>
     (permVisible.value ? 1 : 0) + permQueue.value.length)
+
+  // 选择题弹窗（OpenCode question 工具 → serve 表单）
+  const questionVisible = ref(false)
+  const questionData = ref(null) // { formId, fields: [...], title }
+  const questionQueue = ref([])
+  const seenQuestionIds = new Set()
+  let questionTimer = null
 
   // SSE / 轮询
   let sseController = null
@@ -416,6 +425,11 @@ export function useOpencodeChat({ sessionId, msgListRef }) {
     stopPolling()
     stopStallWatch()
     stopContextWatch()
+    // 切换会话：清空选择题弹窗状态
+    questionQueue.value = []
+    seenQuestionIds.clear()
+    questionData.value = null
+    questionVisible.value = false
     loadMessages()
   }
 
@@ -641,6 +655,11 @@ export function useOpencodeChat({ sessionId, msgListRef }) {
       return
     }
 
+    if (type === 'question.asked') {
+      handleQuestionAsked(data)
+      return
+    }
+
     if (type === 'session.execution.started') {
       running.value = true
       executing.value = true
@@ -743,6 +762,98 @@ export function useOpencodeChat({ sessionId, msgListRef }) {
     }
   }
 
+  // ---------- 选择题（question 工具 → serve 表单） ----------
+
+  const questionPendingCount = computed(() =>
+    (questionVisible.value ? 1 : 0) + questionQueue.value.length)
+
+  /**
+   * 把 serve 返回的表单归一化成弹窗可用结构。
+   * question 工具生成的表单：fields 里的 description 即题目，options 即选项。
+   */
+  function normalizeQuestionForm(form) {
+    const fields = (form.fields || []).map((f) => ({
+      key: f.key,
+      title: f.title,
+      description: f.description,
+      type: f.type,
+      options: f.options || [],
+      custom: !!f.custom,
+      selected: '',
+    }))
+    return { formId: form.id, title: form.title || '选择题', fields }
+  }
+
+  function showNextQuestion() {
+    while (questionQueue.value.length) {
+      const q = questionQueue.value.shift()
+      if (!q) continue
+      questionData.value = q
+      questionVisible.value = true
+      clearTimeout(questionTimer)
+      questionTimer = setTimeout(() => {
+        if (questionVisible.value) ElMessage.warning('选择题长时间未确认，可随时点「查看题目」重新弹出')
+      }, 5 * 60 * 1000)
+      return
+    }
+  }
+
+  function handleQuestionAsked() {
+    // question.asked 事件里没有 formId，具体题目靠拉取表单拿；触发一次拉取即可
+    checkPendingQuestions()
+  }
+
+  async function checkPendingQuestions() {
+    if (!sessionId.value) return
+    let forms = []
+    try {
+      forms = await getChatForms(sessionId.value)
+    } catch {
+      return
+    }
+    if (!Array.isArray(forms) || !forms.length) return
+    for (const f of forms) {
+      if (f.id && !seenQuestionIds.has(f.id)) {
+        seenQuestionIds.add(f.id)
+        questionQueue.value.push(normalizeQuestionForm(f))
+      }
+    }
+    if (questionQueue.value.length && !questionVisible.value) {
+      showNextQuestion()
+    }
+  }
+
+  /**
+   * 提交选择题答案（answers 形如 { [fieldKey]: value }），会话随即继续执行。
+   */
+  async function submitQuestionAnswer(answers) {
+    const q = questionData.value
+    if (!q) return
+    try {
+      await replyChatForm(sessionId.value, q.formId, answers)
+      ElMessage.success('已确认，AI 继续执行')
+    } catch (e) {
+      ElMessage.error(`提交选择失败: ${e.message}`)
+      return
+    }
+    questionData.value = null
+    questionVisible.value = false
+    clearTimeout(questionTimer)
+    showNextQuestion()
+    syncMessagesFromServer()
+  }
+
+  function closeQuestion() {
+    // 暂不回答：从 seen 里移除，下次轮询会重新弹出（不回答 AI 会一直等待）
+    if (questionData.value) {
+      seenQuestionIds.delete(questionData.value.formId)
+    }
+    questionData.value = null
+    questionVisible.value = false
+    clearTimeout(questionTimer)
+    showNextQuestion()
+  }
+
   // ---------- 兜底轮询 ----------
 
   function startPolling() {
@@ -751,6 +862,7 @@ export function useOpencodeChat({ sessionId, msgListRef }) {
       if (!sessionId.value) return
       const mySeq = ++pollSeq
       checkPendingPerms()
+      checkPendingQuestions()
       getChatMessages(sessionId.value).then((raw) => {
         if (mySeq !== pollSeq) return
         const list = (raw && Array.isArray(raw)) ? raw : []
@@ -828,11 +940,16 @@ export function useOpencodeChat({ sessionId, msgListRef }) {
     sseAborted = true
     clearTimeout(sseTimer)
     clearTimeout(permTimer)
+    clearTimeout(questionTimer)
     sseController?.abort()
     stopPolling()
     stopPermWatch()
     stopStallWatch()
     stopContextWatch()
+    questionQueue.value = []
+    seenQuestionIds.clear()
+    questionData.value = null
+    questionVisible.value = false
   }
 
   // ---------- 常驻权限 watchdog ----------
@@ -847,9 +964,11 @@ export function useOpencodeChat({ sessionId, msgListRef }) {
     if (!sessionId.value) return
     permWatchTimer = setInterval(() => {
       checkPendingPerms()
+      checkPendingQuestions()
     }, 3000)
     // 启动即查一次，避免 SSE 事件在订阅前已发生
     checkPendingPerms()
+    checkPendingQuestions()
   }
 
   function stopPermWatch() {
@@ -900,6 +1019,8 @@ export function useOpencodeChat({ sessionId, msgListRef }) {
   return {
     messages, draft, sending, running, executing, idle,
     permVisible, permRequest, permPendingCount,
+    questionVisible, questionData, questionPendingCount,
+    submitQuestionAnswer, closeQuestion, checkPendingQuestions,
     status, stalled, restartServer,
     contextPercent, contextLevel, contextTokens, showCompactButton,
     compacting, compactHint, compactContext,
