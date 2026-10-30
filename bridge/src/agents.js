@@ -47,6 +47,7 @@ AI 新增的业务代码/文档放在隔离目录，这些目录**各自有一�
 2. 这些独立仓库**只在本地，绝不 push**，也不与主仓库混淆
 3. 主仓库（ThesisForge 框架）保持干净：AI 新增内容不会出现在 GitHub
 4. 涉及隔离目录的 git 操作**只允许用 \`git -C <隔离目录路径> add/commit\` 或先 cd 进隔离目录再执行**，严禁在主仓库目录执行 git add 提交 AI 内容
+5. **严禁在主仓库执行任何 \`git add\` / \`git commit\`（包括框架文件）**。若确实需要改框架文件（如 pom 依赖、application.yml），只做修改并把改动清单报告给用户，由用户自行提交；AI 不得代为提交主仓库。
 `
 
 /**
@@ -472,8 +473,13 @@ ${COMMON_RULES}
   - 前端 → \`frontend/src/views/ai-biz/\` 目录 + \`frontend/src/api/ai-biz.js\`
   - 这些目录已在 .gitignore 排除，**不会进入 GitHub 仓库**，只属于用户本地的毕设定制内容
 - **不要修改框架原有包/目录**（\`com.thesisforge.controller\`、\`com.thesisforge.service\`、\`frontend/src/views/\` 下非 ai-biz 的部分）
-- **不可避免的框架文件改动**（如注册路由 \`frontend/src/router/index.js\`、菜单、安全配置）尽量最小化，
-  并在说明中明确标出「这里改了框架文件 X，回滚时需要 git reset」。
+- **框架已提供以下扩展点，优先使用，不要改框架文件**：
+  - 前端路由 → 写在 \`frontend/src/views/ai-biz/routes.js\`（框架 router 自动加载），**不要改** \`frontend/src/router/index.js\`
+  - WebSocket/业务安全 → 在 \`com.thesisforge.ai.config\` 里新增独立 \`SecurityFilterChain\`（\`@Order\` + \`securityMatcher\`），**不要改** \`com.thesisforge.security.SecurityConfig\`
+  - 业务迁移脚本 → \`db/migration-biz/\`（已接入 Flyway）
+  - 业务菜单 → 通过 \`db/migration-biz/\` 的 SQL 插入
+- **确实无法用扩展点解决时**（例如需要新的 Maven 依赖），修改框架文件后**必须明确告知用户**：
+  改了什么、为什么、如何回滚；并且**不要提交主仓库**（主仓库提交由用户自己完成）。
 - 遵循项目现有的代码风格，不要另起一套
 - 不要删除或覆盖与当前子功能无关的代码
 - 改完主动说明「改了什么、怎么验证」
@@ -516,6 +522,9 @@ ${COMMON_RULES}
       { action: 'shell', resource: 'npm run dev*', effect: 'ask' },
       { action: 'shell', resource: 'mvn compile*', effect: 'allow' },
       { action: 'shell', resource: 'mvn -q compile*', effect: 'allow' },
+      // 禁止在主仓库提交（框架文件由用户手动管理；隔离目录请用 git -C ...）
+      { action: 'shell', resource: 'git add *', effect: 'deny' },
+      { action: 'shell', resource: 'git commit *', effect: 'deny' },
       // 危险命令拒绝
       { action: 'shell', resource: 'rm -rf *', effect: 'deny' },
       { action: 'shell', resource: 'rm -r *', effect: 'deny' },

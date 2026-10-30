@@ -21,6 +21,8 @@ spring:
     enabled: true
     # 框架迁移 + AI 业务迁移（隔离目录，不进 git）
     locations: classpath:db/migration,classpath:db/migration-biz
+    # 干净 clone 没有 migration-biz 目录时不报错（AI 定制存在时正常加载）
+    ignore-missing-locations: true
     # 生产环境务必关闭，v1 面向本机开发
     clean-disabled: true
 

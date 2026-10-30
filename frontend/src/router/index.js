@@ -1,63 +1,24 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useUserStore } from '@/store/user'
 
+// ===== AI 定制业务路由（隔离目录）=====
+// 约定路径：../views/ai-biz/routes.js。
+// 该文件不存在时（干净 clone / 无 AI 定制），glob 返回空对象，不影响框架构建。
+// AI 新增页面只改该文件，不再修改本框架 router。
+const aiRouteModules = import.meta.glob('../views/ai-biz/routes.js', { eager: true })
+const aiRoutes = Object.values(aiRouteModules)[0]?.default || {}
+const aiTopLevel = aiRoutes.topLevel || []
+const aiAdminChildren = aiRoutes.adminChildren || []
+
 const router = createRouter({
   history: createWebHistory(),
   routes: [
+    // AI 定制：独立布局的顶层路由（注册页、商城前台等）
+    ...aiTopLevel,
     {
       path: '/login',
       name: 'Login',
       component: () => import('@/views/login/index.vue'),
-    },
-    {
-      path: '/register',
-      name: 'Register',
-      component: () => import('@/views/ai-biz/register/index.vue'),
-    },
-    // ===== AI 定制业务：用户端（商城前台布局，隔离目录 ai-biz）=====
-    {
-      path: '/mall',
-      component: () => import('@/views/ai-biz/layout/UserLayout.vue'),
-      redirect: '/mall/home',
-      children: [
-        {
-          path: 'home',
-          name: 'MallHome',
-          component: () => import('@/views/ai-biz/home/index.vue'),
-          meta: { title: '商城首页' },
-        },
-        {
-          path: 'profile',
-          name: 'MallProfile',
-          component: () => import('@/views/ai-biz/profile/index.vue'),
-          meta: { title: '个人中心' },
-        },
-        {
-          path: 'publish',
-          name: 'MallPublish',
-          component: () => import('@/views/ai-biz/publish/index.vue'),
-          meta: { title: '发布商品' },
-        },
-        {
-          path: 'mygoods',
-          name: 'MallMyGoods',
-          component: () => import('@/views/ai-biz/mygoods/index.vue'),
-          meta: { title: '我的商品' },
-        },
-        {
-          path: 'favorites',
-          name: 'MallFavorites',
-          component: () => import('@/views/ai-biz/favorites/index.vue'),
-          meta: { title: '我的收藏' },
-        },
-        {
-          path: 'goods/:id',
-          name: 'MallGoodsDetail',
-          component: () => import('@/views/ai-biz/goods/detail.vue'),
-          meta: { title: '商品详情' },
-        },
-        // 后续子功能在 ai-biz 下追加用户端页面路由（求购/订单/钱包/私信/个人中心）
-      ],
     },
     {
       path: '/',
@@ -89,7 +50,7 @@ const router = createRouter({
           component: () => import('@/views/system/menu/index.vue'),
           meta: { title: '菜单管理' },
         },
-        // AI定制
+        // AI 定制（框架能力：供应商配置 / 流水线 / 开发聊天）
         {
           path: 'ai/config',
           name: 'AIConfig',
@@ -108,29 +69,19 @@ const router = createRouter({
           component: () => import('@/views/ai/opencode/index.vue'),
           meta: { title: 'AI 开发' },
         },
-        // AI 定制业务：管理端（隔离目录 ai-biz）
-        {
-          path: 'admin/user-cert',
-          name: 'AdminUserCert',
-          component: () => import('@/views/ai-biz/admin/user-cert/index.vue'),
-          meta: { title: '校园认证信息' },
-        },
-        {
-          path: 'admin/goods-audit',
-          name: 'AdminGoodsAudit',
-          component: () => import('@/views/ai-biz/admin/goods-audit/index.vue'),
-          meta: { title: '商品审核' },
-        },
+        // AI 定制业务：管理端（隔离目录 ai-biz，路由来自 ../views/ai-biz/routes.js）
+        ...aiAdminChildren,
       ],
     },
   ],
 })
 
-// 全局前置守卫：未登录或 token 已过期跳转登录页
+// 全局前置守卫：未登录或 token 已过期跳转登录页。
+// 公开页统一用 meta.public 标记（AI 路由在隔离文件里自行声明），框架不再硬编码业务路径。
 router.beforeEach((to, from, next) => {
   const userStore = useUserStore()
-  const publicPages = ['/login', '/register']
-  if (!publicPages.includes(to.path) && !userStore.isLogin) {
+  const isPublic = to.meta?.public === true || to.path === '/login'
+  if (!isPublic && !userStore.isLogin) {
     userStore.logout() // 清理过期 token，避免残留
     next('/login')
   } else {
