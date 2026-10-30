@@ -64,15 +64,21 @@ export function useOpencodeChat({ sessionId, msgListRef }) {
 
   /** 上下文 limit（从 serve 配置，deepseek-v4-flash/pro 均为 100 万） */
   const CONTEXT_LIMIT = 1048576
-  /** 当前会话 tokens 使用量 */
-  const contextInputTokens = ref(0)
-  /** 是否正在请求压缩 */
+  /** 当前上下文真实 token 占用（bridge 基于 /context 计算，非累计值） */
+  const contextTokens = ref(0)
+  /** 是否正在压缩 */
   const compacting = ref(false)
-  /** 上下文占用百分比（0-100+，超过 100 说明超限） */
+  /** 压缩过程中的提示文案（展示在状态条/按钮旁） */
+  const compactHint = ref('')
+  /** 最近一次压缩记录 { status, error, time } */
+  const lastCompaction = ref(null)
+  /** 上下文占用百分比（0-100+） */
   const contextPercent = computed(() => {
-    if (contextInputTokens.value <= 0) return 0
-    return Math.round((contextInputTokens.value / CONTEXT_LIMIT) * 100)
+    if (contextTokens.value <= 0) return 0
+    return Math.round((contextTokens.value / CONTEXT_LIMIT) * 100)
   })
+  /** 是否显示「压缩上下文」按钮：真实占用 >= 50% 才提示 */
+  const showCompactButton = computed(() => contextPercent.value >= 50)
   /** 占用颜色分级 */
   const contextLevel = computed(() => {
     const p = contextPercent.value
@@ -83,30 +89,88 @@ export function useOpencodeChat({ sessionId, msgListRef }) {
 
   let contextTimer = null
 
-  /** 拉取当前会话上下文占用 */
+  /** 拉取当前会话上下文真实占用 + 最近压缩状态 */
   async function refreshContext() {
     if (!sessionId.value) return
     try {
       const info = await getChatSessionInfo(sessionId.value)
-      const tokens = info?.tokens
-      if (tokens) {
-        contextInputTokens.value = tokens.input || 0
+      if (!info) return
+      if (typeof info.contextTokens === 'number') {
+        contextTokens.value = info.contextTokens
+      } else if (info.tokens) {
+        // 兼容旧 bridge：回退到累计值
+        contextTokens.value = info.tokens.input || 0
       }
+      lastCompaction.value = info.lastCompaction || lastCompaction.value
     } catch {
       // 静默失败，下次轮询再试
     }
   }
 
-  /** 请求压缩会话上下文 */
+  /**
+   * 轮询等待压缩真正结束（成功/失败）。
+   * compact 接口只负责「受理」，真正的结果体现在 compaction 消息的 status 上。
+   */
+  async function waitForCompaction(prevTime, timeoutMs = 60000) {
+    const startAt = Date.now()
+    while (Date.now() - startAt < timeoutMs) {
+      await new Promise((r) => setTimeout(r, 1500))
+      if (!sessionId.value) break
+      try {
+        const info = await getChatSessionInfo(sessionId.value)
+        if (!info) continue
+        if (typeof info.contextTokens === 'number') {
+          contextTokens.value = info.contextTokens
+        }
+        const lc = info.lastCompaction
+        if (lc && (lc.time || 0) > prevTime) {
+          lastCompaction.value = lc
+          if (lc.status === 'completed') {
+            return { ok: true, message: '上下文已压缩完成' }
+          }
+          if (lc.status === 'failed') {
+            const reason =
+              lc.error === 'Nothing to compact yet'
+                ? '当前上下文较小，无需压缩'
+                : lc.error || '压缩未执行'
+            return { ok: false, message: reason }
+          }
+        }
+      } catch {
+        // 继续轮询
+      }
+    }
+    return {
+      ok: false,
+      timeout: true,
+      message: '压缩请求已提交，将在当前步骤结束后自动执行',
+    }
+  }
+
+  /** 请求压缩会话上下文，并等待/反馈真实结果 */
   async function compactContext() {
     if (!sessionId.value || compacting.value) return
     compacting.value = true
+    compactHint.value = '正在压缩上下文…'
+    // 先刷新一次，拿到当前最新的压缩记录时间，避免误判历史记录
+    await refreshContext()
+    const prevTime = lastCompaction.value?.time || 0
     try {
       await compactChatSession(sessionId.value)
-      ElMessage.success('压缩请求已提交，将在下一个步骤生效')
-      // 延迟刷新占用（压缩是异步的，稍后生效）
-      setTimeout(refreshContext, 5000)
+      const res = await waitForCompaction(prevTime)
+      if (res.ok) {
+        ElMessage.success(res.message)
+      } else if (res.timeout) {
+        ElMessage.warning(res.message)
+      } else {
+        ElMessage.warning(res.message)
+      }
+      compactHint.value = ''
+      await refreshContext()
+      // 重新拉取消息，让压缩标记（compaction）显示在聊天中
+      await loadMessages()
     } catch (e) {
+      compactHint.value = ''
       ElMessage.error(`压缩上下文失败: ${e.message}`)
     } finally {
       compacting.value = false
@@ -263,6 +327,19 @@ export function useOpencodeChat({ sessionId, msgListRef }) {
           state: p.state?.status === 'error' ? 'error' : 'completed',
         }],
       }
+    }
+    if (m.type === 'compaction') {
+      const ok = m.status === 'completed'
+      const errMsg = m.error?.message || ''
+      let text
+      if (ok) {
+        text = '🗜 上下文已压缩（历史消息已摘要）'
+      } else if (errMsg === 'Nothing to compact yet') {
+        text = '🗜 无需压缩：当前上下文较小'
+      } else {
+        text = `🗜 压缩未执行：${errMsg || '未知原因'}`
+      }
+      return { ...base, role: 'system', text }
     }
     if (m.type === 'idle' && m.outcome === 'error') {
       return { ...base, role: 'system', text: 'AI 回复失败' }
@@ -812,7 +889,8 @@ export function useOpencodeChat({ sessionId, msgListRef }) {
     messages, draft, sending, running, executing, idle,
     permVisible, permRequest, permPendingCount,
     status, stalled, restartServer,
-    contextPercent, contextLevel, compacting, compactContext,
+    contextPercent, contextLevel, contextTokens, showCompactButton,
+    compacting, compactHint, compactContext,
     handleSend, replyPerm, showNextPerm,
     loadMessages, resetForSession, dispose, mount,
     renderMd, formatToolInput, formatToolOutput, scrollToBottom,

@@ -138,6 +138,7 @@
               重启桥接服务
             </el-button>
             <div class="status-right">
+              <span v-if="compactHint" class="compact-hint">{{ compactHint }}</span>
               <el-tag
                 v-if="contextPercent > 0"
                 size="small"
@@ -146,7 +147,7 @@
                 上下文 {{ contextPercent }}%
               </el-tag>
               <el-button
-                v-if="contextPercent >= 60"
+                v-if="showCompactButton"
                 size="small"
                 :loading="compacting"
                 @click="compactContext"
@@ -308,7 +309,7 @@ const {
   messages, draft, sending, running, idle,
   permVisible, permRequest, permPendingCount,
   status, stalled, restartServer,
-  contextPercent, contextLevel, compacting, compactContext,
+  contextPercent, contextLevel, showCompactButton, compacting, compactHint, compactContext,
   handleSend, replyPerm, showNextPerm,
   resetForSession, dispose, mount,
   renderMd, formatToolInput, formatToolOutput,
@@ -933,6 +934,10 @@ onBeforeUnmount(dispose)
   display: flex;
   align-items: center;
   gap: 8px;
+}
+.compact-hint {
+  color: #e6a23c;
+  font-size: 12px;
 }
 .status-dot {
   width: 8px;

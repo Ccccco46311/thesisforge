@@ -440,11 +440,83 @@ export async function listSessions() {
 }
 
 /**
- * 获取单个 session 的详情（含 tokens 使用量，用于展示上下文占用）。
+ * 计算会话「当前上下文」的 token 占用。
+ *
+ * 注意：session 详情里的 `tokens` 是**整会话累计值**（只增不减），不能用来表示
+ * 当前上下文窗口占用。真正的上下文大小应取最近一条已完成 assistant 消息的
+ * prompt token（input + cache.read + cache.write）。
+ *
+ * @param {Array} list /api/session/{id}/context 返回的活跃消息列表
+ * @returns {number} 当前上下文 token 数
+ */
+function computeContextTokens(list) {
+  if (!Array.isArray(list)) return 0
+  const sorted = [...list].sort(
+    (a, b) => (b?.time?.created || 0) - (a?.time?.created || 0),
+  )
+  let fallback = 0
+  for (const m of sorted) {
+    const t = m?.tokens
+    if (!t) continue
+    const total =
+      (t.input || 0) + (t.cache?.read || 0) + (t.cache?.write || 0)
+    if (total <= 0) continue
+    // 优先使用「已完成」的消息，避免取到流式中的半成品
+    if (m.type === 'assistant' && m.time?.completed) return total
+    if (!fallback) fallback = total
+  }
+  return fallback
+}
+
+/**
+ * 从消息列表中挑出最近一条压缩记录，转成前端易用的结构。
+ */
+function pickLastCompaction(messages) {
+  if (!Array.isArray(messages)) return null
+  let latest = null
+  for (const m of messages) {
+    if (m?.type !== 'compaction') continue
+    if (!latest || (m.time?.created || 0) > (latest.time?.created || 0)) {
+      latest = m
+    }
+  }
+  if (!latest) return null
+  return {
+    id: latest.id || '',
+    time: latest.time?.created || 0,
+    status: latest.status || '', // completed | failed
+    reason: latest.reason || '',
+    error: latest.error?.message || '',
+    summaryLength: latest.summary ? latest.summary.length : 0,
+  }
+}
+
+/**
+ * 获取单个 session 的详情，并在原始 session 基础上附加：
+ *   - contextTokens：当前上下文真实占用（区别于累计 tokens）
+ *   - lastCompaction：最近一次压缩的状态（completed / failed）
  */
 export async function getSessionInfo(sessionId) {
   const json = await request('GET', `/api/session/${sessionId}`)
-  return json?.data || null
+  const session = json?.data || null
+  if (!session) return null
+
+  let contextTokens = 0
+  let lastCompaction = null
+  try {
+    const ctxJson = await request('GET', `/api/session/${sessionId}/context`)
+    contextTokens = computeContextTokens(ctxJson?.data)
+  } catch {
+    // context 端点不可用时保持 0，前端会回退到标签不显示
+  }
+  try {
+    const msgJson = await request('GET', `/api/session/${sessionId}/message`)
+    lastCompaction = pickLastCompaction(msgJson?.data)
+  } catch {
+    // 忽略：压缩状态属于增强信息
+  }
+
+  return { ...session, contextTokens, lastCompaction }
 }
 
 /**
