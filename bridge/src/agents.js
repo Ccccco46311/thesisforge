@@ -48,6 +48,31 @@ AI 新增的业务代码/文档放在隔离目录，这些目录**各自有一�
 3. 主仓库（ThesisForge 框架）保持干净：AI 新增内容不会出现在 GitHub
 4. 涉及隔离目录的 git 操作**只允许用 \`git -C <隔离目录路径> add/commit\` 或先 cd 进隔离目录再执行**，严禁在主仓库目录执行 git add 提交 AI 内容
 5. **严禁在主仓库执行任何 \`git add\` / \`git commit\`（包括框架文件）**。若确实需要改框架文件（如 pom 依赖、application.yml），只做修改并把改动清单报告给用户，由用户自行提交；AI 不得代为提交主仓库。
+
+## 框架扩展点（2026-10 隔离重构后，务必按此开发）
+
+主仓库只保留框架本体，以下扩展点是专为 AI 业务预留的，**优先使用，不要改框架文件**：
+
+> 注意：隔离目录已被 `.gitignore` 排除，`grep`/`glob` 可能搜不到其中的文件；确认文件是否存在请直接用 `read` 打开具体路径，**不要因为搜不到就断定「不存在」**。
+
+1. **前端路由**：在 \`frontend/src/views/ai-biz/routes.js\` 维护路由，导出：
+   \`\`\`js
+   export default {
+     topLevel: [...],      // 独立布局的顶层路由：注册页、商城前台等
+     adminChildren: [...], // 挂到框架后台 '/' 布局下的管理页
+   }
+   \`\`\`
+   - 公开页（无需登录）加 \`meta: { public: true }\`
+   - 框架 \`frontend/src/router/index.js\` 已用 \`import.meta.glob\` 自动加载该文件，**不要再改框架 router**；该文件不存在时框架仍可正常构建
+2. **后端安全**：需要放行 AI 自己的接口/WebSocket 时，在 \`com.thesisforge.ai.config\` 新增独立的 \`SecurityFilterChain\`：
+   在 \`@Bean\` 方法上加 \`@Order(1)\`，并用 \`.securityMatcher("/你的路径/**")\` 限定范围；**不要改** \`com.thesisforge.security.SecurityConfig\`
+   - \`/ws/**\` 已由 \`AiSecurityConfig\` 放行，token 由 \`ChatHandshakeInterceptor\` 从 query 参数校验
+3. **数据库迁移**：业务建表/改表写到 \`backend/src/main/resources/db/migration-biz/\`，版本号用 V2000 段；框架迁移在 \`db/migration/\`（V1000 段），**不要改**
+   - 已配置 \`ignore-missing-locations\`，干净 clone 没有 migration-biz 目录也不会报错
+4. **WebSocket**：\`spring-boot-starter-websocket\` 已是框架依赖，可直接使用；新增端点放在 AI 包内，并沿用上面的独立安全链放行
+5. **菜单**：通过 \`db/migration-biz/\` 的 SQL 插入，不要改框架菜单代码
+
+**确实需要改框架文件时**（例如新增 Maven 依赖）：先说明原因和影响，改完把「改了哪个文件、为什么、如何回滚」写进总结，并提醒用户自行提交；AI 不得提交主仓库。
 `
 
 /**
@@ -742,6 +767,9 @@ ${COMMON_RULES}
     { action: 'shell', resource: 'npm run build*', effect: 'allow' },
     { action: 'shell', resource: 'mvn compile*', effect: 'allow' },
     { action: 'shell', resource: 'mvn -q compile*', effect: 'allow' },
+    // 禁止在主仓库提交（框架文件由用户手动管理；隔离目录请用 git -C ...）
+    { action: 'shell', resource: 'git add *', effect: 'deny' },
+    { action: 'shell', resource: 'git commit *', effect: 'deny' },
     { action: 'shell', resource: 'rm -rf *', effect: 'deny' },
     { action: 'shell', resource: 'rm -r *', effect: 'deny' },
     { action: 'shell', resource: 'del * /s /q', effect: 'deny' },
