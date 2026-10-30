@@ -1,15 +1,26 @@
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
 import router from '@/router'
+import { useUserStore } from '@/store/user'
+import { getToken } from '@/utils/authStorage'
 
 const request = axios.create({
   baseURL: '/api',
   timeout: 30000,
 })
 
+/** 清理当前标签页登录态并跳转登录页（不影响其它标签页）。 */
+function logoutAndRedirect() {
+  useUserStore().logout()
+  if (router.currentRoute.value.path !== '/login') {
+    router.push('/login')
+    ElMessage.warning('登录已过期，请重新登录')
+  }
+}
+
 // 请求拦截：附加 token
 request.interceptors.request.use((config) => {
-  const token = localStorage.getItem('token')
+  const token = getToken()
   if (token) {
     config.headers.Authorization = `Bearer ${token}`
   }
@@ -21,8 +32,10 @@ request.interceptors.response.use(
   (response) => {
     const res = response.data
     if (res.code !== 200) {
-      // _silent：由调用方自行处理（例如「文档尚未生成」属正常状态）
-      if (!response.config?._silent) {
+      if (res.code === 401) {
+        logoutAndRedirect()
+      } else if (!response.config?._silent) {
+        // _silent：由调用方自行处理（例如「文档尚未生成」属正常状态）
         ElMessage.error(res.msg || '请求失败')
       }
       const err = new Error(res.msg || '请求失败')
@@ -34,14 +47,12 @@ request.interceptors.response.use(
   },
   (error) => {
     const status = error.response?.status
-    if (status === 401 || status === 403) {
-      // 401：token 缺失/过期；403：无权限（含旧版本后端对无效 token 返回 403 的兼容）
-      localStorage.removeItem('token')
-      localStorage.removeItem('user')
-      if (router.currentRoute.value.path !== '/login') {
-        router.push('/login')
-        ElMessage.warning('登录已过期，请重新登录')
-      }
+    if (status === 401) {
+      // token 缺失/过期：只清理当前标签页
+      logoutAndRedirect()
+    } else if (status === 403) {
+      // 已登录但无权限：保留登录态，避免把普通用户误踢到登录页
+      ElMessage.error(error.response?.data?.msg || '没有访问权限')
     } else {
       ElMessage.error(error.response?.data?.msg || error.message || '网络错误')
     }

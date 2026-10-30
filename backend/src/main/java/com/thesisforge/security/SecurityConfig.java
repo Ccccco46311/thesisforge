@@ -2,6 +2,7 @@ package com.thesisforge.security;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.thesisforge.common.Result;
+import jakarta.servlet.DispatcherType;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
@@ -41,10 +42,15 @@ public class SecurityConfig {
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
+                        // SSE / 异步响应在二次分派（ASYNC）时会丢失 SecurityContext，
+                        // 原请求已经通过鉴权，这里放行容器内部的异步/错误分派，避免响应已提交后又报 403。
+                        .dispatcherTypeMatchers(DispatcherType.ASYNC, DispatcherType.ERROR).permitAll()
                         .requestMatchers("/api/auth/login", "/api/auth/register").permitAll()
                         // 商品图片等静态资源（/uploads/**）公开访问，img 标签加载不带 token
                         .requestMatchers("/uploads/**").permitAll()
                         .requestMatchers("/error").permitAll()
+                        // 后台管理 / AI 开发仅管理员可访问；商城用户端接口仍只要求登录
+                        .requestMatchers("/api/system/**", "/api/ai/**", "/api/admin/**").hasRole("ADMIN")
                         .anyRequest().authenticated())
                 // 未认证 / token 无效或过期：返回 401 + 统一 JSON（Spring Security 默认返回 403，会让前端误判为无权限）
                 .exceptionHandling(ex -> ex

@@ -9,6 +9,8 @@ import {
   compactChatSession,
 } from '@/api/opencode'
 import router from '@/router'
+import { useUserStore } from '@/store/user'
+import { getToken } from '@/utils/authStorage'
 
 /**
  * OpenCode 聊天核心逻辑（SSE 流式 + 权限弹窗 + 兜底轮询）。
@@ -21,6 +23,7 @@ import router from '@/router'
  * @param {import('vue').Ref<HTMLElement>} opts.msgListRef 消息列表容器（用于滚动到底部）
  */
 export function useOpencodeChat({ sessionId, msgListRef }) {
+  const userStore = useUserStore()
   const messages = ref([])
   const draft = ref('')
   const sending = ref(false)
@@ -478,7 +481,7 @@ export function useOpencodeChat({ sessionId, msgListRef }) {
   // ---------- SSE ----------
 
   function connectSse() {
-    const token = localStorage.getItem('token')
+    const token = getToken()
     if (!token) return
     sseController = new AbortController()
     const url = `${import.meta.env.VITE_API_BASE || ''}/api/ai/chat/events`
@@ -487,13 +490,17 @@ export function useOpencodeChat({ sessionId, msgListRef }) {
       signal: sseController.signal,
     })
       .then((resp) => {
-        if (resp.status === 401 || resp.status === 403) {
+        if (resp.status === 401) {
           sseAborted = true
-          localStorage.removeItem('token')
-          localStorage.removeItem('user')
+          userStore.logout()
           ElMessage.warning('登录已过期，请重新登录')
           router.push('/login')
           throw new Error(`SSE HTTP ${resp.status}`)
+        }
+        if (resp.status === 403) {
+          sseAborted = true
+          ElMessage.error('没有访问 AI 开发功能的权限')
+          throw new Error('没有访问 AI 开发功能的权限')
         }
         if (!resp.ok) throw new Error(`SSE HTTP ${resp.status}`)
         return resp.body.getReader()
@@ -707,7 +714,7 @@ export function useOpencodeChat({ sessionId, msgListRef }) {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            Authorization: `Bearer ${localStorage.getItem('token')}`,
+            Authorization: `Bearer ${getToken()}`,
           },
           body: JSON.stringify({ decision }),
         },
@@ -872,7 +879,7 @@ export function useOpencodeChat({ sessionId, msgListRef }) {
     try {
       await fetch(`${import.meta.env.VITE_API_BASE || ''}/api/ai/chat/restart`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+        headers: { Authorization: `Bearer ${getToken()}` },
       })
       stalled.value = false
       running.value = false

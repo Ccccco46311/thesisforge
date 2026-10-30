@@ -1,5 +1,6 @@
 package com.thesisforge.security;
 
+import com.thesisforge.mapper.SysRoleMapper;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -15,6 +16,7 @@ import org.springframework.util.StringUtils;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -25,6 +27,7 @@ import java.util.List;
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private final JwtUtil jwtUtil;
+    private final SysRoleMapper roleMapper;
 
     @Override
     protected void doFilterInternal(HttpServletRequest request,
@@ -35,10 +38,20 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             String token = header.substring(7);
             Long userId = jwtUtil.parseUserId(token);
             if (userId != null && SecurityContextHolder.getContext().getAuthentication() == null) {
-                // 简单模式：userId 即主体。权限校验由接口自行控制，v1 单管理员。
+                // userId 即主体；同时加载角色，供 /api/system/**、/api/ai/** 等后台接口做管理员校验。
+                List<String> roleKeys = roleMapper.selectRoleKeysByUserId(userId);
+                List<SimpleGrantedAuthority> authorities = new ArrayList<>();
+                authorities.add(new SimpleGrantedAuthority("ROLE_USER"));
+                if (roleKeys != null) {
+                    for (String roleKey : roleKeys) {
+                        if (StringUtils.hasText(roleKey)) {
+                            authorities.add(new SimpleGrantedAuthority("ROLE_" + roleKey.toUpperCase()));
+                        }
+                    }
+                }
                 UserDetails userDetails = User.withUsername(String.valueOf(userId))
                         .password("")
-                        .authorities(List.of(new SimpleGrantedAuthority("ROLE_USER")))
+                        .authorities(authorities)
                         .build();
                 UsernamePasswordAuthenticationToken auth =
                         new UsernamePasswordAuthenticationToken(userDetails, null, userDetails.getAuthorities());

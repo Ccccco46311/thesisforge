@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import { ElMessage } from 'element-plus'
 import { useUserStore } from '@/store/user'
 
 // ===== AI 定制业务路由（隔离目录）=====
@@ -24,6 +25,8 @@ const router = createRouter({
       path: '/',
       component: () => import('@/layout/index.vue'),
       redirect: '/dashboard',
+      // 后台布局及其所有子路由仅管理员可访问；商城前台在 /mall 下独立判断。
+      meta: { requiresAdmin: true },
       children: [
         {
           path: 'dashboard',
@@ -84,9 +87,19 @@ router.beforeEach((to, from, next) => {
   if (!isPublic && !userStore.isLogin) {
     userStore.logout() // 清理过期 token，避免残留
     next('/login')
-  } else {
-    next()
+    return
   }
+
+  // 后台路由（/dashboard、/system/**、/ai/**、AI 业务管理端）仅 admin 可进。
+  const requiresAdmin = to.meta?.requiresAdmin === true
+  const isAdmin = (userStore.userInfo?.roles || []).includes('admin')
+  if (requiresAdmin && !isAdmin) {
+    ElMessage.warning('没有访问权限')
+    next(router.hasRoute('MallHome') ? '/mall/home' : '/login')
+    return
+  }
+
+  next()
 })
 
 export default router

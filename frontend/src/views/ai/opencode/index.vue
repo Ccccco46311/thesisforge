@@ -203,6 +203,10 @@ import {
 import { getProviderConfig, getPipeline } from '@/api/ai'
 import PermissionDialog from '@/components/PermissionDialog.vue'
 import router from '@/router'
+import { useUserStore } from '@/store/user'
+import { getToken } from '@/utils/authStorage'
+
+const userStore = useUserStore()
 
 // ---------- 状态 ----------
 const sessions = ref([])
@@ -421,7 +425,7 @@ async function handleRestart() {
   try {
     const resp = await fetch(`${import.meta.env.VITE_API_BASE || ''}/api/ai/chat/restart`, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+      headers: { Authorization: `Bearer ${getToken()}` },
     })
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
     stalled.value = false
@@ -747,7 +751,7 @@ function finishStreaming() {
 // ---------- SSE ----------
 
 function connectSse() {
-  const token = localStorage.getItem('token')
+  const token = getToken()
   if (!token) return
   sseController = new AbortController()
   const url = `${import.meta.env.VITE_API_BASE || ''}/api/ai/chat/events`
@@ -756,14 +760,18 @@ function connectSse() {
     signal: sseController.signal,
   })
     .then((resp) => {
-      if (resp.status === 401 || resp.status === 403) {
+      if (resp.status === 401) {
         // 登录态失效：停止重连并跳转登录页
         sseAborted = true
-        localStorage.removeItem('token')
-        localStorage.removeItem('user')
+        userStore.logout()
         ElMessage.warning('登录已过期，请重新登录')
         router.push('/login')
         throw new Error(`SSE HTTP ${resp.status}`)
+      }
+      if (resp.status === 403) {
+        sseAborted = true
+        ElMessage.error('没有访问 AI 开发功能的权限')
+        throw new Error('没有访问 AI 开发功能的权限')
       }
       if (!resp.ok) throw new Error(`SSE HTTP ${resp.status}`)
       return resp.body.getReader()
@@ -988,7 +996,7 @@ async function replyPerm(decision) {
   try {
     const resp = await fetch(`/api/ai/chat/sessions/${currentId.value}/permission/${reqId}/reply`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` },
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
       body: JSON.stringify({ decision }),
     })
     if (resp.ok) ok = true

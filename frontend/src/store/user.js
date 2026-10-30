@@ -1,4 +1,5 @@
 import { defineStore } from 'pinia'
+import { clearAuth, getAuth, setAuth } from '@/utils/authStorage'
 
 /**
  * 解析 JWT 的 exp，判断是否已过期（预留 30 秒余量）。
@@ -15,11 +16,14 @@ function isTokenExpired(token) {
 }
 
 export const useUserStore = defineStore('user', {
-  state: () => ({
-    token: localStorage.getItem('token') || '',
-    userInfo: JSON.parse(localStorage.getItem('user') || 'null'),
-    menus: JSON.parse(localStorage.getItem('menus') || '[]'),
-  }),
+  state: () => {
+    const auth = getAuth()
+    return {
+      token: auth?.token || '',
+      userInfo: auth?.user || null,
+      menus: auth?.menus || [],
+    }
+  },
   getters: {
     isLogin: (state) => !!state.token && !isTokenExpired(state.token),
   },
@@ -33,17 +37,17 @@ export const useUserStore = defineStore('user', {
         roles: data.roles,
       }
       this.menus = data.menus || []
-      localStorage.setItem('token', this.token)
-      localStorage.setItem('user', JSON.stringify(this.userInfo))
-      localStorage.setItem('menus', JSON.stringify(this.menus))
+      setAuth({
+        token: this.token,
+        user: this.userInfo,
+        menus: this.menus,
+      })
     },
     logout() {
       this.token = ''
       this.userInfo = null
       this.menus = []
-      localStorage.removeItem('token')
-      localStorage.removeItem('user')
-      localStorage.removeItem('menus')
+      clearAuth()
     },
   },
 })
