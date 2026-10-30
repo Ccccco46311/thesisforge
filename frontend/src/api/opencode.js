@@ -14,6 +14,8 @@ export const compactChatSession = (sessionId) =>
   request.post(`/ai/chat/sessions/${sessionId}/compact`)
 export const getChatPermissions = (sessionId) =>
   request.get(`/ai/chat/sessions/${sessionId}/permission`)
+export const describeChatPermission = (data) =>
+  request.post('/ai/chat/permission/describe', data, { _silent: true })
 export const replyChatPermission = (sessionId, requestId, decision) =>
   request.post(`/ai/chat/sessions/${sessionId}/permission/${requestId}/reply`, { decision })
 export const getChatStatus = () => request.get('/ai/chat/status')

@@ -20,6 +20,7 @@ import {
   openEventStream,
   replyPermission,
   listPermissions,
+  describePermission,
   PROJECT_ROOT,
 } from './opencode.js'
 
@@ -284,6 +285,20 @@ app.post('/api/opencode/sessions/:id/permission/:requestId/reply', async (req, r
     res.json({ code: 200, msg: 'ok', data: true })
   } catch (e) {
     res.status(500).json({ code: 500, msg: `回复权限请求失败: ${e.message}`, data: null })
+  }
+})
+
+/**
+ * POST /api/ai/permission/describe
+ * body: 权限请求 { action, resources, metadata, message }
+ * 调用已配置的模型，生成一句中文执行描述 + 风险点；失败时 data 为 null。
+ */
+app.post('/api/ai/permission/describe', async (req, res) => {
+  try {
+    const data = await describePermission(req.body || {})
+    res.json({ code: 200, msg: 'ok', data })
+  } catch (e) {
+    res.json({ code: 200, msg: 'ok', data: null })
   }
 })
 

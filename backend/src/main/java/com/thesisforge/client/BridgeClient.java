@@ -241,6 +241,30 @@ public class BridgeClient {
     }
 
     /**
+     * 为权限请求生成 AI 描述和风险点。
+     *
+     * @param payload 权限请求 { action, resources, metadata, message }
+     * @return {summary, risk, risks}；bridge 或模型不可用时返回 null
+     */
+    public JsonNode describeChatPermission(JsonNode payload) {
+        try {
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            HttpEntity<String> entity =
+                    new HttpEntity<>(objectMapper.writeValueAsString(payload), headers);
+            ResponseEntity<String> resp = restTemplate.exchange(
+                    bridgeUrl + "/api/ai/permission/describe",
+                    HttpMethod.POST, entity, String.class);
+            JsonNode json = objectMapper.readTree(resp.getBody());
+            JsonNode data = json.path("data");
+            return data.isMissingNode() || data.isNull() ? null : data;
+        } catch (Exception e) {
+            log.warn("bridge 不可用，生成权限描述失败: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    /**
      * 回复权限请求。
      *
      * @return 是否成功

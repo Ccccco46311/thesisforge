@@ -112,6 +112,15 @@ public class AiChatController {
         return Result.ok();
     }
 
+    /**
+     * 为权限请求生成一句中文执行描述 + 风险点。
+     * 模型不可用时返回 data=null，由前端降级显示。
+     */
+    @PostMapping("/permission/describe")
+    public Result<JsonNode> describePermission(@RequestBody JsonNode payload) {
+        return Result.ok(aiChatService.describePermission(payload));
+    }
+
     // ---------- SSE ----------
 
     /**

@@ -176,24 +176,12 @@
     </main>
 
     <!-- 权限确认弹窗 -->
-    <el-dialog
+    <PermissionDialog
       v-model="permVisible"
-      title="权限确认"
-      width="480px"
-      :close-on-click-modal="false"
-      :show-close="false"
-      append-to-body
-    >
-      <div class="perm-content">
-        <p class="perm-desc">AI 请求执行以下操作，是否允许？</p>
-        <div class="perm-action">{{ permRequest?.action }}</div>
-        <pre class="perm-resources">{{ permRequest?.resources?.join('\n') }}</pre>
-      </div>
-      <template #footer>
-        <el-button type="danger" @click="replyPerm('reject')">拒绝</el-button>
-        <el-button type="primary" @click="replyPerm('once')">允许</el-button>
-      </template>
-    </el-dialog>
+      :request="permRequest"
+      @allow="replyPerm('once')"
+      @reject="replyPerm('reject')"
+    />
   </div>
 </template>
 
@@ -213,6 +201,7 @@ import {
   compactChatSession,
 } from '@/api/opencode'
 import { getProviderConfig, getPipeline } from '@/api/ai'
+import PermissionDialog from '@/components/PermissionDialog.vue'
 import router from '@/router'
 
 // ---------- 状态 ----------
@@ -956,7 +945,14 @@ function handlePermission(data) {
   if (data.sessionID && data.sessionID !== currentId.value) return
   if (shownPermIds.has(id)) return
   shownPermIds.add(id)
-  const item = { id, action: data.action || 'shell', resources: data.resources || [] }
+  const item = {
+    id,
+    action: data.action || 'shell',
+    resources: data.resources || [],
+    metadata: data.metadata,
+    message: data.message,
+    source: data.source,
+  }
   if (data.sessionID) item.sessionId = data.sessionID
   permQueue.value.push(item)
   if (!permVisible.value) showNextPerm()
@@ -970,7 +966,7 @@ function showNextPerm() {
   const p = permQueue.value.shift()
   if (!p) return
   pendingPermId.value = p.id
-  permRequest.value = { action: p.action, resources: p.resources }
+  permRequest.value = { ...p }
   permVisible.value = true
   // 防漏：弹窗长时未操作自动拒绝，避免无限卡死
   clearTimeout(permTimer)
@@ -1016,7 +1012,7 @@ async function checkPendingPerms() {
     if (!Array.isArray(perms) || !perms.length) return
     for (const p of perms) {
       if (p.id && !shownPermIds.has(p.id)) {
-        handlePermission({ id: p.id, action: p.action, resources: p.resources, sessionID: currentId.value })
+        handlePermission({ ...p, sessionID: p.sessionID || currentId.value })
       }
     }
   } catch {
@@ -1425,38 +1421,6 @@ function scrollToBottom() {
 .hint {
   font-size: 12px;
   color: #909399;
-}
-
-/* 权限弹窗 */
-.perm-content {
-  padding: 4px 0;
-}
-.perm-desc {
-  color: #606266;
-  margin: 0 0 10px;
-}
-.perm-action {
-  display: inline-block;
-  background: #f0f2f5;
-  padding: 4px 12px;
-  border-radius: 4px;
-  font-family: 'Consolas', monospace;
-  font-size: 13px;
-  margin-bottom: 8px;
-  color: #303133;
-}
-.perm-resources {
-  background: #f8f8f8;
-  border-radius: 4px;
-  padding: 10px;
-  margin: 0;
-  font-family: 'Consolas', monospace;
-  font-size: 12px;
-  color: #606266;
-  white-space: pre-wrap;
-  word-break: break-all;
-  max-height: 200px;
-  overflow-y: auto;
 }
 
 :deep(.markdown-body pre) {

@@ -214,6 +214,14 @@ public class AiChatService {
         return bridgeClient.listChatPermissions(sessionId);
     }
 
+    /**
+     * 为权限请求生成一句中文描述和风险点。
+     * 失败返回 null，前端自行降级为本地规则描述。
+     */
+    public JsonNode describePermission(JsonNode payload) {
+        return bridgeClient.describeChatPermission(payload);
+    }
+
     private void bumpMessageCount(String sessionId) {
         try {
             AiChatSession exist = chatSessionMapper.selectOne(

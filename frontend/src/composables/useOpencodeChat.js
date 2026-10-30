@@ -661,7 +661,14 @@ export function useOpencodeChat({ sessionId, msgListRef }) {
     if (data.sessionID && data.sessionID !== sessionId.value) return
     if (shownPermIds.has(id)) return
     shownPermIds.add(id)
-    const item = { id, action: data.action || 'shell', resources: data.resources || [] }
+    const item = {
+      id,
+      action: data.action || 'shell',
+      resources: data.resources || [],
+      metadata: data.metadata,
+      message: data.message,
+      source: data.source,
+    }
     if (data.sessionID) item.sessionId = data.sessionID
     permQueue.value.push(item)
     if (!permVisible.value) showNextPerm()
@@ -675,7 +682,7 @@ export function useOpencodeChat({ sessionId, msgListRef }) {
     const p = permQueue.value.shift()
     if (!p) return
     pendingPermId.value = p.id
-    permRequest.value = { action: p.action, resources: p.resources }
+    permRequest.value = { ...p }
     permVisible.value = true
     clearTimeout(permTimer)
     permTimer = setTimeout(() => {
@@ -721,9 +728,7 @@ export function useOpencodeChat({ sessionId, msgListRef }) {
       if (!Array.isArray(perms) || !perms.length) return
       for (const p of perms) {
         if (p.id && !shownPermIds.has(p.id)) {
-          handlePermission({
-            id: p.id, action: p.action, resources: p.resources, sessionID: sessionId.value,
-          })
+          handlePermission({ ...p, sessionID: p.sessionID || sessionId.value })
         }
       }
     } catch {

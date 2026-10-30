@@ -261,24 +261,12 @@
     </div>
 
     <!-- 权限弹窗 -->
-    <el-dialog
+    <PermissionDialog
       v-model="permVisible"
-      title="权限确认"
-      width="480px"
-      :close-on-click-modal="false"
-      :show-close="false"
-      append-to-body
-    >
-      <div class="perm-content">
-        <p class="perm-desc">AI 请求执行以下操作，是否允许？</p>
-        <div class="perm-action">{{ permRequest?.action }}</div>
-        <pre class="perm-resources">{{ permRequest?.resources?.join('\n') }}</pre>
-      </div>
-      <template #footer>
-        <el-button type="danger" @click="replyPerm('reject')">拒绝</el-button>
-        <el-button type="primary" @click="replyPerm('once')">允许</el-button>
-      </template>
-    </el-dialog>
+      :request="permRequest"
+      @allow="replyPerm('once')"
+      @reject="replyPerm('reject')"
+    />
   </div>
 </template>
 
@@ -290,6 +278,7 @@ import {
   Check, Tools, Loading, CircleCheckFilled,
 } from '@element-plus/icons-vue'
 import DocPreview from '@/components/DocPreview.vue'
+import PermissionDialog from '@/components/PermissionDialog.vue'
 import { useOpencodeChat } from '@/composables/useOpencodeChat'
 import {
   getPipeline, startPipeline, advanceStage, reopenStage, resetPipeline,
@@ -996,31 +985,6 @@ onBeforeUnmount(dispose)
 .input-buttons {
   display: flex;
   gap: 8px;
-}
-
-/* 权限弹窗 */
-.perm-content {
-  font-size: 14px;
-}
-.perm-desc {
-  margin: 0 0 10px;
-  color: #606266;
-}
-.perm-action {
-  font-weight: 600;
-  color: #e6a23c;
-  margin-bottom: 6px;
-}
-.perm-resources {
-  background: #f5f7fa;
-  padding: 10px;
-  border-radius: 4px;
-  font-size: 12px;
-  max-height: 220px;
-  overflow-y: auto;
-  margin: 0;
-  white-space: pre-wrap;
-  word-break: break-all;
 }
 
 /* 开发阶段进度计划面板 */
