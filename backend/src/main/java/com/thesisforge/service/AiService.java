@@ -1,6 +1,7 @@
 package com.thesisforge.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.thesisforge.client.BridgeClient;
 import com.thesisforge.common.BusinessException;
@@ -54,7 +55,26 @@ public class AiService {
         return dto;
     }
 
+    /**
+     * 测试供应商配置是否可用（供配置页「测试连接」按钮使用）。
+     */
+    public JsonNode testProvider(ProviderConfigDTO dto) {
+        Map<String, String> cfg = new HashMap<>();
+        cfg.put("baseUrl", dto.getBaseUrl());
+        cfg.put("apiKey", dto.getApiKey());
+        cfg.put("model", dto.getModel());
+        return bridgeClient.testProvider(cfg);
+    }
+
     public void saveProviderConfig(ProviderConfigDTO dto) {
+        // 保存前强制做连接测试，配置错误直接拒绝保存，避免“保存成功但不可用”
+        JsonNode test = testProvider(dto);
+        if (test == null || !test.path("ok").asBoolean(false)) {
+            String msg = test != null ? test.path("message").asText("") : "";
+            throw new BusinessException("连接测试未通过："
+                    + (msg == null || msg.isBlank() ? "请检查 API Key、接口地址和模型名称" : msg));
+        }
+
         AiProviderConfig config = providerConfigMapper.selectById(1L);
         boolean isNew = (config == null);
         if (config == null) {
@@ -78,7 +98,7 @@ public class AiService {
             providerConfigMapper.updateById(config);
         }
 
-        // 同步到 bridge，让 OpenCode 生效（bridge 不可用则记录日志，不阻塞）
+        // 同步到 bridge，让 OpenCode 生效（失败要明确告知用户）
         Map<String, String> bridgeConfig = new HashMap<>();
         bridgeConfig.put("provider", dto.getProvider());
         bridgeConfig.put("apiKey", dto.getApiKey());
@@ -90,7 +110,9 @@ public class AiService {
         bridgeConfig.put("dbUser", dto.getDbUser());
         bridgeConfig.put("dbPassword", dto.getDbPassword());
         bridgeConfig.put("opencodeUrl", dto.getOpencodeUrl());
-        bridgeClient.applyProviderConfig(bridgeConfig);
+        if (!bridgeClient.applyProviderConfig(bridgeConfig)) {
+            throw new BusinessException("配置已保存，但应用到 OpenCode 失败：bridge 服务不可用，请重启 bridge 后重试");
+        }
     }
 
     // ================ 进度计划 ================

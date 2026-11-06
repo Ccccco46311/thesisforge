@@ -1,5 +1,6 @@
 package com.thesisforge.controller;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.thesisforge.common.Result;
 import com.thesisforge.dto.CreatePlanDTO;
 import com.thesisforge.dto.PlanVO;
@@ -33,6 +34,14 @@ public class AiController {
     public Result<Void> saveProviderConfig(@RequestBody ProviderConfigDTO dto) {
         aiService.saveProviderConfig(dto);
         return Result.ok();
+    }
+
+    /**
+     * 测试供应商连接（配置页「测试连接」按钮）。
+     */
+    @PostMapping("/provider-test")
+    public Result<JsonNode> testProvider(@RequestBody ProviderConfigDTO dto) {
+        return Result.ok(aiService.testProvider(dto));
     }
 
     // ---------- 进度计划 ----------

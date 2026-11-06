@@ -53,15 +53,44 @@ public class BridgeClient {
 
     /**
      * 通知 bridge 重新应用供应商配置。
+     *
+     * @return 是否成功应用到 OpenCode
      */
-    public void applyProviderConfig(Map<String, String> config) {
+    public boolean applyProviderConfig(Map<String, String> config) {
         try {
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
             HttpEntity<Map<String, String>> entity = new HttpEntity<>(config, headers);
             restTemplate.exchange(bridgeUrl + "/provider/apply", HttpMethod.POST, entity, String.class);
+            return true;
         } catch (Exception e) {
             log.warn("bridge 不可用，供应商配置未应用到 OpenCode: {}", e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * 测试供应商配置是否可用（models 优先，chat 回退）。
+     *
+     * @return { ok, code, message }
+     */
+    public JsonNode testProvider(Map<String, String> config) {
+        try {
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            HttpEntity<Map<String, String>> entity = new HttpEntity<>(config, headers);
+            ResponseEntity<String> resp = restTemplate.exchange(
+                    bridgeUrl + "/provider/test", HttpMethod.POST, entity, String.class);
+            JsonNode json = objectMapper.readTree(resp.getBody());
+            return json.path("data");
+        } catch (Exception e) {
+            log.warn("bridge 不可用，测试供应商失败: {}", e.getMessage());
+            JsonNode node = objectMapper.createObjectNode();
+            ((com.fasterxml.jackson.databind.node.ObjectNode) node).put("ok", false);
+            ((com.fasterxml.jackson.databind.node.ObjectNode) node).put("code", 0);
+            ((com.fasterxml.jackson.databind.node.ObjectNode) node).put(
+                    "message", "无法连接 bridge 服务，请确认 bridge 已启动：" + e.getMessage());
+            return node;
         }
     }
 

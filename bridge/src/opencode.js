@@ -299,6 +299,102 @@ export async function applyProvider(config) {
   return true
 }
 
+// ---------- 供应商连接测试 ----------
+
+function providerStatusMessage(status, detail = '') {
+  const d = detail ? `（${String(detail).replace(/\s+/g, ' ').slice(0, 160)}）` : ''
+  if (status === 401) return `API Key 无效或未授权（HTTP 401）${d}`
+  if (status === 403) return `API Key 没有访问权限（HTTP 403）${d}`
+  if (status === 404) return `接口地址或模型名称不正确（HTTP 404）${d}`
+  if (status === 429) return `请求过于频繁或额度不足（HTTP 429），请稍后重试${d}`
+  if (status >= 500) return `模型服务端错误（HTTP ${status}），请稍后重试${d}`
+  return `请求失败（HTTP ${status}）${d}`
+}
+
+function networkMessage(e) {
+  const cause = e?.cause || {}
+  const msg = [e?.message, cause?.message, cause?.code].filter(Boolean).join(' ')
+  if (/bad port/i.test(msg)) {
+    return '接口地址的端口不合法，请检查 Base URL 是否正确'
+  }
+  if (/invalid url|invalid_url|url invalid/i.test(msg)) {
+    return '接口地址格式不正确，请检查 Base URL（需以 http:// 或 https:// 开头）'
+  }
+  if (/timeout|timed out|abort|UND_ERR_CONNECT_TIMEOUT/i.test(msg)) {
+    return '连接超时，请检查接口地址、网络或代理'
+  }
+  if (/ENOTFOUND|EAI_AGAIN|getaddrinfo/i.test(msg)) {
+    return '无法解析接口地址（域名不存在），请检查 Base URL'
+  }
+  if (/ECONNREFUSED/i.test(msg)) {
+    return '连接被拒绝，请检查接口地址和端口是否正确'
+  }
+  return `无法连接到接口地址：${cause?.message || e?.message || '未知网络错误'}`
+}
+
+/**
+ * 测试供应商配置是否可用。
+ * 先 GET {baseUrl}/models（不消耗 token），不支持时回退一次最小 chat/completions。
+ * @param {object} config { baseUrl, apiKey, model }
+ * @returns {Promise<{ok:boolean, code:number, message:string}>}
+ */
+export async function testProvider(config = {}) {
+  const baseUrl = String(config.baseUrl || '').trim().replace(/\/+$/, '')
+  const apiKey = String(config.apiKey || '').trim()
+  const model = String(config.model || '').trim()
+  if (!baseUrl) return { ok: false, code: 0, message: '接口地址不能为空' }
+  if (!apiKey) return { ok: false, code: 0, message: 'API Key 不能为空' }
+  if (!model) return { ok: false, code: 0, message: '模型名称不能为空' }
+
+  const headers = { Authorization: `Bearer ${apiKey}` }
+
+  // 1) 优先 GET /models（不耗 token）
+  try {
+    const r = await fetch(`${baseUrl}/models`, {
+      headers,
+      signal: AbortSignal.timeout(10000),
+    })
+    if (r.ok) {
+      const json = await r.json().catch(() => null)
+      const ids = Array.isArray(json?.data)
+        ? json.data.map((x) => x?.id).filter(Boolean)
+        : []
+      if (!ids.length || ids.includes(model)) {
+        return { ok: true, code: 200, message: '连接成功' }
+      }
+      // 模型不在 /models 列表里：有些供应商不暴露部署模型，继续用一次最小 chat 调用做真实校验
+    }
+    // 鉴权 / 限流 / 服务端错误直接返回，不继续回退
+    if ([401, 403, 429].includes(r.status) || r.status >= 500) {
+      const text = await r.text().catch(() => '')
+      return { ok: false, code: r.status, message: providerStatusMessage(r.status, text) }
+    }
+    // 404/405/501 等：该供应商可能没实现 /models，回退最小 chat 调用
+  } catch (e) {
+    return { ok: false, code: 0, message: networkMessage(e) }
+  }
+
+  // 2) 回退：最小 chat/completions（max_tokens=1）
+  try {
+    const r = await fetch(`${baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model,
+        messages: [{ role: 'user', content: 'ping' }],
+        max_tokens: 1,
+        stream: false,
+      }),
+      signal: AbortSignal.timeout(15000),
+    })
+    if (r.ok) return { ok: true, code: 200, message: '连接成功' }
+    const text = await r.text().catch(() => '')
+    return { ok: false, code: r.status, message: providerStatusMessage(r.status, text) }
+  } catch (e) {
+    return { ok: false, code: 0, message: networkMessage(e) }
+  }
+}
+
 let cachedAuth = null
 
 async function getAuth() {

@@ -222,6 +222,7 @@ import QuestionDialog from '@/components/QuestionDialog.vue'
 import router from '@/router'
 import { useUserStore } from '@/store/user'
 import { getToken } from '@/utils/authStorage'
+import { formatAiError, isIdleDone } from '@/utils/aiError'
 
 const userStore = useUserStore()
 
@@ -729,8 +730,8 @@ function parseMessage(m) {
     }
     return { ...base, role: 'system', text }
   }
-  if (m.type === 'idle' && m.outcome === 'error') {
-    return { ...base, role: 'system', text: 'AI 回复失败' }
+  if (m.type === 'idle' && (m.outcome === 'failed' || m.outcome === 'interrupted')) {
+    return { ...base, role: 'system', text: formatAiError(m) }
   }
   return null
 }
@@ -1165,7 +1166,7 @@ function startPolling() {
       if (mySeq !== pollSeq) return
       const list = (raw && Array.isArray(raw)) ? raw : []
       const parsed = parseMessageList(list)
-      const done = list.some((m) => m.type === 'idle' && (m.outcome === 'succeeded' || m.outcome === 'error'))
+      const done = list.some(isIdleDone)
       const hasStreaming = messages.value.some((m) => m.streaming)
 
       if (hasStreaming && !done) {

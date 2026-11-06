@@ -56,6 +56,16 @@
 
       <el-form-item>
         <el-button type="primary" :loading="saving" @click="save">保存配置</el-button>
+        <el-button :loading="testing" @click="runTest">测试连接</el-button>
+      </el-form-item>
+
+      <el-form-item v-if="testResult">
+        <el-alert
+          :type="testResult.ok ? 'success' : 'error'"
+          :title="testResult.ok ? '连接成功' : testResult.message"
+          :closable="false"
+          show-icon
+        />
       </el-form-item>
     </el-form>
   </el-card>
@@ -64,9 +74,11 @@
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { getProviderConfig, saveProviderConfig } from '@/api/ai'
+import { getProviderConfig, saveProviderConfig, testProviderConfig } from '@/api/ai'
 
 const saving = ref(false)
+const testing = ref(false)
+const testResult = ref(null)
 const form = reactive({
   provider: 'deepseek',
   apiKey: '',
@@ -88,11 +100,58 @@ onMounted(async () => {
   }
 })
 
-async function save() {
-  saving.value = true
+function validate() {
+  if (!form.provider) {
+    ElMessage.warning('请选择供应商类型')
+    return false
+  }
+  if (!form.apiKey || !form.apiKey.trim()) {
+    ElMessage.warning('请填写 API Key')
+    return false
+  }
+  if (!form.baseUrl || !form.baseUrl.trim()) {
+    ElMessage.warning('请填写接口地址')
+    return false
+  }
+  if (!form.model || !form.model.trim()) {
+    ElMessage.warning('请填写模型名称')
+    return false
+  }
+  return true
+}
+
+/** 测试供应商连接（models 优先，chat 回退），返回是否成功。 */
+async function runTest() {
+  if (!validate()) return false
+  testing.value = true
+  testResult.value = null
   try {
+    const r = await testProviderConfig(form)
+    testResult.value = r || { ok: false, message: '测试接口没有返回结果' }
+    if (r?.ok) {
+      ElMessage.success('连接成功')
+    } else {
+      ElMessage.error(r?.message || '连接测试未通过')
+    }
+    return !!r?.ok
+  } catch (e) {
+    testResult.value = { ok: false, message: e.message || '连接测试失败' }
+    return false
+  } finally {
+    testing.value = false
+  }
+}
+
+async function save() {
+  if (!validate()) return
+  saving.value = true
+  testResult.value = null
+  try {
+    // 后端保存前会强制连接测试，失败会返回具体原因
     await saveProviderConfig(form)
-    ElMessage.success('配置已保存')
+    ElMessage.success('配置已保存并生效')
+  } catch {
+    // 错误提示由 request 拦截器统一显示（含连接测试未通过的具体原因）
   } finally {
     saving.value = false
   }

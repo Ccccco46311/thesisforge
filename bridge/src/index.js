@@ -17,6 +17,7 @@ import {
   compactSession,
   deleteSession,
   applyProvider,
+  testProvider,
   openEventStream,
   replyPermission,
   listPermissions,
@@ -121,6 +122,20 @@ app.post('/provider/apply', async (req, res) => {
     res.json({ code: 200, msg: 'ok', data: { applied: true } })
   } catch (e) {
     res.status(500).json({ code: 500, msg: `应用 OpenCode 配置失败: ${e.message}`, data: null })
+  }
+})
+
+/**
+ * POST /provider/test
+ * body: { baseUrl, apiKey, model }
+ * 测试供应商配置是否可用（models 优先，chat 回退）。
+ */
+app.post('/provider/test', async (req, res) => {
+  try {
+    const result = await testProvider(req.body || {})
+    res.json({ code: 200, msg: 'ok', data: result })
+  } catch (e) {
+    res.json({ code: 200, msg: 'ok', data: { ok: false, code: 0, message: `测试失败: ${e.message}` } })
   }
 })
 

@@ -3,6 +3,7 @@ import request from '@/utils/request'
 // AI 供应商配置
 export const getProviderConfig = () => request.get('/ai/provider-config')
 export const saveProviderConfig = (data) => request.post('/ai/provider-config', data)
+export const testProviderConfig = (data) => request.post('/ai/provider-test', data)
 
 // 进度计划
 export const getPlan = (params) => request.get('/ai/plan', { params })
